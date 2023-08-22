@@ -207,6 +207,7 @@ bool IsValidHttpToken(const char *, size_t);
 bool IsValidCookieValue(const char *, size_t);
 bool IsAcceptablePath(const char *, size_t);
 bool IsAcceptableHost(const char *, size_t);
+bool IsAcceptableHostIpv6(const char *, size_t);
 bool IsAcceptablePort(const char *, size_t);
 bool IsReasonablePath(const char *, size_t);
 int ParseForwarded(const char *, size_t, uint32_t *, uint16_t *);

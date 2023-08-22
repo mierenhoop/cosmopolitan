@@ -3366,7 +3366,7 @@ static const char *LuaCheckHost(lua_State *L, int idx, size_t *hostlen) {
     *hostlen = url.host.n;
   } else {
     host = luaL_checklstring(L, idx, hostlen);
-    if (!IsAcceptableHost(host, *hostlen)) {
+    if (!IsAcceptableHostIpv6(host, *hostlen)) {
       WARNF("(srvr) bad host %`'.*s", *hostlen, host);
       luaL_argerror(L, idx, "bad host");
       __builtin_unreachable();
@@ -6013,7 +6013,7 @@ static char *HandleRequest(void) {
   ParseRequestParameters();
   if (!url.host.n || !url.path.n || url.path.p[0] != '/' ||
       !IsAcceptablePath(url.path.p, url.path.n) ||
-      !IsAcceptableHost(url.host.p, url.host.n) ||
+      !IsAcceptableHostIpv6(url.host.p, url.host.n) ||
       !IsAcceptablePort(url.port.p, url.port.n)) {
     free(url.params.p);
     LockInc(&shared->c.urisrefused);

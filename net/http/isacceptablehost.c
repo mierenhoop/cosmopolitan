@@ -1,5 +1,5 @@
 /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:2;tab-width:8;coding:utf-8 -*-│
-│vi: set net ft=c ts=2 sts=2 sw=2 fenc=utf-8                                :vi│
+│ vi: set noet ft=c ts=2 sts=2 sw=2 fenc=utf-8                                :vi│
 ╞══════════════════════════════════════════════════════════════════════════════╡
 │ Copyright 2021 Justine Alexandra Roberts Tunney                              │
 │                                                                              │
@@ -84,9 +84,45 @@ bool IsAcceptableHost(const char *s, size_t n) {
   }
   if (j != 3) {
     return false;
-  }
-  if (i && s[i - 1] == '.') {
-    return false;
-  }
-  return true;
+	}
+	if (i && s[i - 1] == '.') {
+		return false;
+	}
+	return true;
+}
+
+bool IsAcceptableHostIpv6(const char *s, size_t n) {
+	if (IsAcceptableHost(s, n)) return true;
+
+	if (n == -1) n = s ? strlen(s) : 0;
+	if (!n) return true;
+
+	bool hasfill = false;
+	int curncol = 0;
+	int cursz = 0;
+	int totcol = 0;
+	int c;
+	for (int i = 0; i < n; i++) {
+		c = s[i] & 255;
+		if (isxdigit(c)) {
+			curncol = 0;
+			cursz++;
+			if (cursz > 4) return false;
+		} else if (c == ':') {
+			cursz = 0;
+			curncol++;
+			totcol++;
+			if (curncol > 2) return false;
+			if (curncol == 2) {
+				if (hasfill) return false;
+				hasfill = true;
+			}
+		} else {
+			return false;
+		}
+	}
+
+	if (hasfill) return totcol <= 7;
+
+	return totcol == 7;
 }

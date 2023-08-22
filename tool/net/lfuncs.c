@@ -698,7 +698,7 @@ int LuaIsReasonablePath(lua_State *L) {
 }
 
 int LuaIsAcceptableHost(lua_State *L) {
-  return LuaIsValid(L, IsAcceptableHost);
+  return LuaIsValid(L, IsAcceptableHostIpv6);
 }
 
 int LuaIsAcceptablePort(lua_State *L) {
