@@ -14,6 +14,7 @@ THIRD_PARTY_LUA_BINS =							\
 THIRD_PARTY_LUA_CHECKS =						\
 	$(THIRD_PARTY_LUA_A).pkg					\
 	$(THIRD_PARTY_LUA_UNIX).pkg					\
+	$(THIRD_PARTY_LUA_LPEG).pkg					\
 	$(THIRD_PARTY_LUA_HDRS:%=o/$(MODE)/%.ok)			\
 	o/$(MODE)/third_party/lua/lua.com.pkg				\
 	o/$(MODE)/third_party/lua/luac.com.pkg
@@ -221,6 +222,63 @@ $(THIRD_PARTY_LUA_UNIX_A).pkg:						\
 		$(foreach x,$(THIRD_PARTY_LUA_UNIX_DIRECTDEPS),$($(x)_A).pkg)
 
 ################################################################################
+# lpeg.a
+
+THIRD_PARTY_LUA_LPEG =							\
+	$(THIRD_PARTY_LUA_A_DEPS)					\
+	$(THIRD_PARTY_LUA_A)
+
+THIRD_PARTY_LUA_ARTIFACTS +=						\
+	THIRD_PARTY_LUA_LPEG
+
+THIRD_PARTY_LUA_LPEG_A =							\
+	o/$(MODE)/third_party/lua/lpeg.a
+
+THIRD_PARTY_LUA_LPEG_HDRS =						\
+	third_party/lua/lpcap.h \
+	third_party/lua/lpcset.h \
+	third_party/lua/lptree.h \
+	third_party/lua/lpvm.h \
+	third_party/lua/lpcode.h \
+	third_party/lua/lpprint.h \
+	third_party/lua/lptypes.h
+
+
+THIRD_PARTY_LUA_LPEG_SRCS =						\
+	third_party/lua/lpcap.c						\
+	third_party/lua/lpcset.c					\
+	third_party/lua/lptree.c					\
+	third_party/lua/lpcode.c					\
+	third_party/lua/lpprint.c					\
+	third_party/lua/lpvm.c
+
+THIRD_PARTY_LUA_LPEG_OBJS =						\
+	$(THIRD_PARTY_LUA_LPEG_SRCS:%.c=o/$(MODE)/%.o)
+
+THIRD_PARTY_LUA_LPEG_DIRECTDEPS =					\
+	LIBC_CALLS							\
+	LIBC_FMT							\
+	LIBC_INTRIN							\
+	LIBC_LOG							\
+	LIBC_MEM							\
+	LIBC_RUNTIME							\
+	LIBC_STDIO							\
+	LIBC_STR							\
+	THIRD_PARTY_LUA
+
+THIRD_PARTY_LUA_LPEG_DEPS :=						\
+	$(call uniq,$(foreach x,$(THIRD_PARTY_LUA_LPEG_DIRECTDEPS),$($(x))))
+
+$(THIRD_PARTY_LUA_A):							\
+		third_party/lua/					\
+		$(THIRD_PARTY_LUA_LPEG_A).pkg				\
+		$(THIRD_PARTY_LUA_LPEG_OBJS)
+
+$(THIRD_PARTY_LUA_LPEG_A).pkg:						\
+		$(THIRD_PARTY_LUA_LPEG_OBJS)				\
+		$(foreach x,$(THIRD_PARTY_LUA_LPEG_DIRECTDEPS),$($(x)_A).pkg)
+
+################################################################################
 # lua.com
 
 THIRD_PARTY_LUA_LUA_DIRECTDEPS =					\
@@ -236,6 +294,7 @@ THIRD_PARTY_LUA_LUA_DIRECTDEPS =					\
 	THIRD_PARTY_LINENOISE						\
 	THIRD_PARTY_LUA							\
 	THIRD_PARTY_LUA_UNIX						\
+	THIRD_PARTY_LUA_LPEG						\
 	TOOL_ARGS
 
 THIRD_PARTY_LUA_LUA_DEPS :=						\

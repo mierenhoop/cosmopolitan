@@ -49,6 +49,7 @@
 #include "third_party/lua/lrepl.h"
 #include "third_party/lua/lualib.h"
 #include "third_party/lua/lunix.h"
+#include "third_party/lua/lptree.h"
 #include "tool/args/args.h"
 __static_yoink("lua_notice");
 
@@ -359,6 +360,8 @@ static int pmain (lua_State *L) {
   }
   luaL_openlibs(L);  /* open standard libraries */
   luaL_requiref(L, "unix", LuaUnix, 1);
+  lua_pop(L, 1);
+  luaL_requiref(L, "lpeg", luaopen_lpeg, 1);
   lua_pop(L, 1);
   createargtable(L, argv, argc, script);  /* create table 'arg' */
   lua_gc(L, LUA_GCGEN, 0, 0);  /* GC in generational mode */
