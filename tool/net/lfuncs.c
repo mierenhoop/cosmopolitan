@@ -448,7 +448,9 @@ int LuaSlurp(lua_State *L) {
     j = luaL_checkinteger(L, 3);
   }
   luaL_buffinit(L, &b);
-  if ((fd = open(luaL_checkstring(L, 1), O_RDONLY | O_SEQUENTIAL)) == -1) {
+  if (lua_isinteger(L, 1)) {
+    fd = luaL_checkinteger(L, 1);
+  } else if ((fd = open(luaL_checkstring(L, 1), O_RDONLY | O_SEQUENTIAL)) == -1) {
     return LuaUnixSysretErrno(L, "open", olderr);
   }
   if (i < 0 || j < 0) {
@@ -523,7 +525,9 @@ int LuaBarf(lua_State *L) {
     luaL_error(L, "O_APPEND with offset not possible");
     __builtin_unreachable();
   }
-  if ((fd = open(luaL_checkstring(L, 1), flags, mode)) == -1) {
+  if (lua_isinteger(L, 1)) {
+    fd = luaL_checkinteger(L, 1);
+  } else if ((fd = open(luaL_checkstring(L, 1), flags, mode)) == -1) {
     return LuaUnixSysretErrno(L, "open", olderr);
   }
   for (i = 0; i < n; i += wrote) {
