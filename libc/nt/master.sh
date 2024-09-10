@@ -412,6 +412,7 @@ imp	'GetParent'						GetParent						user32		1
 imp	'GetShellWindow'					GetShellWindow						user32		0
 imp	'GetSystemMenu'						GetSystemMenu						user32		2
 imp	'GetWindow'						GetWindow						user32		2
+imp	'GetWindowLongPtr'					GetWindowLongPtrW					user32		2
 imp	'GetWindowPlacement'					GetWindowPlacement					user32		2
 imp	'GetWindowRect'						GetWindowRect						user32		2
 imp	'GetWindowText'						GetWindowTextW						user32		3
@@ -445,6 +446,7 @@ imp	'SetCursor'						SetCursor						user32		1
 imp	'SetParent'						SetParent						user32		2
 imp	'SetTimer'						SetTimer						user32		4
 imp	'SetWindowLong'						SetWindowLongW						user32		3
+imp	'SetWindowLongPtr'					SetWindowLongPtrW					user32		3
 imp	'SetWindowPlacement'					SetWindowPlacement					user32		2
 imp	'SetWindowPos'						SetWindowPos						user32		7
 imp	'SetWindowText'						SetWindowTextW						user32		2
@@ -477,6 +479,7 @@ imp	'RestoreDC'						RestoreDC						gdi32		2
 imp	'SaveDC'						SaveDC							gdi32		1
 imp	'SelectObject'						SelectObject						gdi32		2
 imp	'SetBkMode'						SetBkMode						gdi32		2
+imp	'SetDIBitsToDevice'					SetDIBitsToDevice					gdi32		12
 imp	'SetPixel'						SetPixel						gdi32		4
 imp	'SetPixelFormat'					SetPixelFormat						gdi32		3
 imp	'SetTextAlign'						SetTextAlign						gdi32		2
