@@ -57,6 +57,7 @@ int32_t SetWindowPos(int64_t hWnd, int64_t hWndInsertAfter, int X, int Y,
 bool32 GetWindowPlacement(int64_t hWnd, struct NtWindowPlacement *lpwndpl);
 bool32 SetWindowPlacement(int64_t hWnd,
                           const struct NtWindowPlacement *lpwndpl);
+int64_t GetWindowLongPtr(int64_t hWnd, int nIndex);
 
 int64_t GetCursor(void);
 int64_t SetCursor(int64_t hCursor);

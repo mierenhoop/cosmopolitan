@@ -1,0 +1,6 @@
+#ifndef COSMOPOLITAN_LIBC_NT_ENUM_BI_H_
+#define COSMOPOLITAN_LIBC_NT_ENUM_BI_H_
+
+#define kNtBiBitfields 3
+
+#endif /* COSMOPOLITAN_LIBC_NT_ENUM_BI_H_ */

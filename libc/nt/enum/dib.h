@@ -1,0 +1,6 @@
+#ifndef COSMOPOLITAN_LIBC_NT_ENUM_DIB_H_
+#define COSMOPOLITAN_LIBC_NT_ENUM_DIB_H_
+
+#define kNtDibRgbColors 0
+
+#endif /* COSMOPOLITAN_LIBC_NT_ENUM_DIB_H_ */

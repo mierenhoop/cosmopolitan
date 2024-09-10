@@ -1,0 +1,6 @@
+#ifndef COSMOPOLITAN_LIBC_NT_ENUM_GWLP_H_
+#define COSMOPOLITAN_LIBC_NT_ENUM_GWLP_H_
+
+#define kNtGwlpUserdata (-21)
+
+#endif /* COSMOPOLITAN_LIBC_NT_ENUM_GWLP_H_ */

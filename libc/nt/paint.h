@@ -1,5 +1,6 @@
 #ifndef COSMOPOLITAN_LIBC_NT_PAINT_H_
 #define COSMOPOLITAN_LIBC_NT_PAINT_H_
+#include "libc/nt/struct/bitmapinfo.h"
 #include "libc/nt/struct/drawtextparams.h"
 #include "libc/nt/struct/paintstruct.h"
 #include "libc/nt/struct/rect.h"
@@ -36,6 +37,10 @@ bool32 DeleteObject(int64_t ho);
 bool32 DeleteDC(int64_t hdc);
 int SaveDC(int64_t hdc);
 bool32 RestoreDC(int64_t hdc, int nSavedDC);
+int SetDIBitsToDevice(int64_t hdc, int xDest, int yDest, uint32_t w, uint32_t h,
+                      int xSrc, int ySrc, uint32_t StartScan, uint32_t cLines,
+                      const void *lpvBits, const struct NtBitmapInfo *lpbmi,
+                      uint32_t ColorUse);
 
 #if ShouldUseMsabiAttribute()
 #include "libc/nt/thunk/paint.inc"
