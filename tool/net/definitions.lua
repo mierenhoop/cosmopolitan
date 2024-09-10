@@ -5310,7 +5310,7 @@ function unix.dup(oldfd, newfd, flags, lowest) end
 ---              else
 ---                 break
 ---              end
----           elseif err:errno() ~= EINTR then
+---           elseif err:errno() ~= unix.EINTR then
 ---              Log(kLogWarn, tostring(err))
 ---              break
 ---           end
