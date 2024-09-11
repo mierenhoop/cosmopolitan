@@ -1,0 +1,6 @@
+#ifndef COSMOPOLITAN_LIBC_NT_ENUM_PM_H_
+#define COSMOPOLITAN_LIBC_NT_ENUM_PM_H_
+
+#define kNtPmRemove 0x0001
+
+#endif /* COSMOPOLITAN_LIBC_NT_ENUM_PM_H_ */

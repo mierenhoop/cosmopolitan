@@ -3,6 +3,7 @@
 #include "libc/nt/struct/rect.h"
 #include "libc/nt/struct/windowplacement.h"
 #include "libc/nt/struct/wndclass.h"
+#include "libc/nt/struct/wndclassex.h"
 #include "libc/nt/typedef/timerproc.h"
 /*                            ░░░░
                        ▒▒▒░░░▒▒▒▒▒▒▒▓▓▓░
@@ -36,12 +37,14 @@ int64_t CreateWindowEx(uint32_t dwExStyle, const char16_t *lpClassName,
                        int64_t hMenu, int64_t hInstance, int64_t lpParam);
 
 uint16_t RegisterClass(const struct NtWndClass *lpWndClass);
+uint16_t RegisterClassEx(const struct NtWndClassEx *lpWndClass);
 
 int64_t DefWindowProc(int64_t hWnd, uint32_t Msg, uint64_t wParam,
                       int64_t lParam);
 
 int32_t CloseWindow(int64_t hWnd);
 int32_t DestroyWindow(int64_t hWnd);
+int32_t UpdateWindow(int64_t hWnd);
 int32_t ShowWindow(int64_t hWnd, int sw);
 int32_t ShowCaret(bool32 bShow);
 int32_t AnimateWindow(int64_t hWnd, uint32_t dwTime, uint32_t dwFlags);
@@ -58,6 +61,7 @@ bool32 GetWindowPlacement(int64_t hWnd, struct NtWindowPlacement *lpwndpl);
 bool32 SetWindowPlacement(int64_t hWnd,
                           const struct NtWindowPlacement *lpwndpl);
 int64_t GetWindowLongPtr(int64_t hWnd, int nIndex);
+int64_t SetWindowLongPtr(int64_t hWnd, int nIndex, int64_t dwNewLong);
 
 int64_t GetCursor(void);
 int64_t SetCursor(int64_t hCursor);

@@ -38,6 +38,8 @@ void PostQuitMessage(int nExitCode);
 bool32 GetCursorPos(struct NtPoint *lpPoint);
 int64_t SendMessage(int64_t hWnd, uint32_t Msg, uint64_t wParam,
                     int64_t lParam);
+int32_t PeekMessage(struct NtMsg *lpMsg, int64_t hWnd, uint32_t wMsgFilterMin,
+                    uint32_t wMsgFilterMax, uint32_t wRemoveMsg);
 
 #define EVENTLOG_SUCCESS          0x00000000
 #define EVENTLOG_ERROR_TYPE       0x00000001

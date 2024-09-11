@@ -16,6 +16,7 @@ int32_t BitBlt(int64_t hdc, int x, int y, int cx, int cy, int64_t hdcSrc,
                int x1, int y1, uint32_t rop);
 int32_t GetClientRect(int64_t hWnd, struct NtRect *lpRect);
 int32_t GetWindowRect(int64_t hWnd, struct NtRect *lpRect);
+int32_t InvalidateRect(int64_t hWnd, const struct NtRect *lpRect, int32_t bErase);
 int32_t SetBkMode(int64_t hdc, int mode);
 uint32_t SetTextColor(int64_t hdc, uint32_t color);
 uint32_t SetTextAlign(int64_t hdc, uint32_t align);
