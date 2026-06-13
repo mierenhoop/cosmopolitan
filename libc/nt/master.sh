@@ -439,6 +439,7 @@ imp	'GetMessage'						GetMessageW						user32		4
 imp	'GetMonitorInfo'					GetMonitorInfoW						user32		2
 imp	'GetRawInputData'					GetRawInputData						user32		5
 imp	'GetParent'						GetParent						user32		1
+imp	'GetQueueStatus'					GetQueueStatus						user32		1
 imp	'GetShellWindow'					GetShellWindow						user32		0
 imp	'GetSystemMenu'						GetSystemMenu						user32		2
 imp	'GetSystemMetrics'					GetSystemMetrics					user32		1
@@ -602,6 +603,7 @@ imp	'WSAAsyncGetHostByAddr'					WSAAsyncGetHostByAddr					ws2_32		7
 imp	'WSAAsyncGetHostByName'					WSAAsyncGetHostByName					ws2_32		5
 imp	'WSAAsyncGetProtoByName'				WSAAsyncGetProtoByName					ws2_32		5
 imp	'WSAAsyncGetProtoByNumber'				WSAAsyncGetProtoByNumber				ws2_32		5
+imp	'WSAAsyncSelect'					WSAAsyncSelect						ws2_32		4
 imp	'WSACleanup'						WSACleanup						ws2_32		0
 imp	'WSACloseEvent'						WSACloseEvent						ws2_32		1
 imp	'WSAConnect'						WSAConnect						ws2_32		7

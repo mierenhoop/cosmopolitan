@@ -73,5 +73,7 @@ int32_t SetEvent(int64_t hEvent);
 int32_t ResetEvent(int64_t hEvent);
 int32_t PulseEvent(int64_t hEvent);
 
+uint32_t GetQueueStatus(uint32_t flags);
+
 COSMOPOLITAN_C_END_
 #endif /* COSMOPOLITAN_LIBC_NT_EVENTS_H_ */

@@ -407,6 +407,8 @@ bool32 WSACloseEvent(const int64_t hEvent);
 bool32 WSAResetEvent(const int64_t hEvent);
 bool32 WSASetEvent(const int64_t hEvent);
 
+int WSAAsyncSelect(uint64_t s, int64_t hWnd, uint32_t wMsg, long lEvent);
+
 int WSAEventSelect(uint64_t s, const int64_t opt_hEventObject,
                    long lNetworkEvents);
 

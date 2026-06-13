@@ -1,5 +1,6 @@
 #ifndef COSMOPOLITAN_LIBC_NT_WINDOWS_H_
 #define COSMOPOLITAN_LIBC_NT_WINDOWS_H_
+#include "libc/nt/struct/point.h"
 #include "libc/nt/struct/rect.h"
 #include "libc/nt/struct/windowplacement.h"
 #include "libc/nt/struct/wndclass.h"
@@ -99,6 +100,9 @@ int WideCharToMultiByte(unsigned int CodePage, uint32_t dwFlags,
                         uint16_t *lpWideCharStr, int cchWideChar,
                         char *lpMultiByteStr, int cbMultiByte,
                         uint16_t *lpDefaultChar, int *lpUsedDefaultChar);
+
+bool32 ScreenToClient(int64_t hWnd, struct NtPoint *lpPoint):
+bool32 AdjustWindowRectEx(struct NtRect *lpRect, uint32_t dwStyle, bool32 bMenu, uint32_t swExStyle);
 
 COSMOPOLITAN_C_END_
 #endif /* COSMOPOLITAN_LIBC_NT_WINDOWS_H_ */
