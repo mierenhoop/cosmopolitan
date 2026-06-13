@@ -16,13 +16,13 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
+#include "libc/calls/calls.h"
 #include "libc/calls/struct/sigset.internal.h"
 #include "libc/calls/syscall-sysv.internal.h"
 #include "libc/dce.h"
 #include "libc/intrin/describeflags.h"
 #include "libc/intrin/directmap.h"
 #include "libc/intrin/dll.h"
-#include "libc/intrin/kprintf.h"
 #include "libc/intrin/maps.h"
 #include "libc/intrin/strace.h"
 #include "libc/intrin/tree.h"
@@ -37,7 +37,8 @@
 
 #define PGUP(x) (((x) + pagesz - 1) & -pagesz)
 
-static int __mprotect_chunk(char *addr, size_t size, int prot, bool iscow) {
+static int __mprotect_chunk_impl(char *addr, size_t size, int prot,
+                                 bool iscow) {
 
   if (!IsWindows())
     return sys_mprotect(addr, size, prot);
@@ -47,6 +48,18 @@ static int __mprotect_chunk(char *addr, size_t size, int prot, bool iscow) {
     return -1;
 
   return 0;
+}
+
+static int __mprotect_chunk(char *addr, size_t size, int prot, bool iscow) {
+  int rc = __mprotect_chunk_impl(addr, size, prot, iscow);
+  if (rc != -1) {
+    if (prot & (PROT_READ | PROT_WRITE)) {
+      __maps_mark(addr, size);
+    } else {
+      __maps_unmark(addr, size);
+    }
+  }
+  return rc;
 }
 
 int __mprotect(char *addr, size_t size, int prot) {
@@ -70,14 +83,11 @@ int __mprotect(char *addr, size_t size, int prot) {
   // change mappings
   int rc = 0;
   bool found = false;
-  if (__maps_lock()) {
-    __maps_unlock();
-    return edeadlk();
-  }
-  struct Map *map, *floor;
-StartOver:
-  floor = __maps_floor(addr);
-  for (map = floor; map && map->addr <= addr + size; map = __maps_next(map)) {
+  __maps_lock();
+  struct Map *map;
+  if (!(map = __maps_floor(addr)))
+    map = __maps_first();
+  for (; map && map->addr <= addr + size; map = __maps_next(map)) {
     char *map_addr = map->addr;
     size_t map_size = map->size;
     char *beg = MAX(addr, map_addr);
@@ -86,7 +96,7 @@ StartOver:
       continue;
     found = true;
     if (addr <= map_addr && addr + size >= map_addr + PGUP(map_size)) {
-      // change protection of entire mapping
+      // change protection status of pages
       if (!__mprotect_chunk(map_addr, map_size, prot, map->iscow)) {
         map->prot = prot;
       } else {
@@ -98,8 +108,6 @@ StartOver:
       size_t right = map_size - left;
       struct Map *leftmap;
       if ((leftmap = __maps_alloc())) {
-        if (leftmap == MAPS_RETRY)
-          goto StartOver;
         if (!__mprotect_chunk(map_addr, left, prot, false)) {
           leftmap->addr = map_addr;
           leftmap->size = left;
@@ -111,7 +119,7 @@ StartOver:
           leftmap->hand = map->hand;
           map->addr += left;
           map->size = right;
-          map->hand = -1;
+          map->hand = MAPS_SUBREGION;
           if (!(map->flags & MAP_ANONYMOUS))
             map->off += left;
           tree_insert(&__maps.maps, &leftmap->tree, __maps_compare);
@@ -130,8 +138,6 @@ StartOver:
       size_t right = map_addr + map_size - addr;
       struct Map *leftmap;
       if ((leftmap = __maps_alloc())) {
-        if (leftmap == MAPS_RETRY)
-          goto StartOver;
         if (!__mprotect_chunk(map_addr + left, right, prot, false)) {
           leftmap->addr = map_addr;
           leftmap->size = left;
@@ -144,7 +150,7 @@ StartOver:
           map->addr += left;
           map->size = right;
           map->prot = prot;
-          map->hand = -1;
+          map->hand = MAPS_SUBREGION;
           if (!(map->flags & MAP_ANONYMOUS))
             map->off += left;
           tree_insert(&__maps.maps, &leftmap->tree, __maps_compare);
@@ -164,14 +170,8 @@ StartOver:
       size_t right = map_size - middle - left;
       struct Map *leftmap;
       if ((leftmap = __maps_alloc())) {
-        if (leftmap == MAPS_RETRY)
-          goto StartOver;
         struct Map *midlmap;
         if ((midlmap = __maps_alloc())) {
-          if (midlmap == MAPS_RETRY) {
-            __maps_free(leftmap);
-            goto StartOver;
-          }
           if (!__mprotect_chunk(map_addr + left, middle, prot, false)) {
             leftmap->addr = map_addr;
             leftmap->size = left;
@@ -186,10 +186,10 @@ StartOver:
             midlmap->off = (map->flags & MAP_ANONYMOUS) ? 0 : map->off + left;
             midlmap->prot = prot;
             midlmap->flags = map->flags;
-            midlmap->hand = -1;
+            midlmap->hand = MAPS_SUBREGION;
             map->addr += left + middle;
             map->size = right;
-            map->hand = -1;
+            map->hand = MAPS_SUBREGION;
             if (!(map->flags & MAP_ANONYMOUS))
               map->off += left + middle;
             tree_insert(&__maps.maps, &leftmap->tree, __maps_compare);
@@ -222,11 +222,20 @@ StartOver:
 /**
  * Modifies restrictions on virtual memory address range.
  *
- * @param addr needs to be 4kb aligned
- * @param prot can have PROT_{NONE,READ,WRITE,EXEC}
+ * POSIX doesn't require mprotect() to be async signal safe. However you
+ * should be able to call this from a signal handler safely, if you know
+ * that your signal will never interrupt the cosmopolitan memory manager
+ * and the only way you can ensure that, is by blocking signals whenever
+ * you call mmap(), munmap(), mprotect(), etc.
+ *
+ * @param addr needs to be page size aligned
+ * @param size is rounded up to the page size
+ * @param prot can be PROT_NONE or a combination of PROT_READ,
+ *     PROT_WRITE, and PROT_EXEC
  * @return 0 on success, or -1 w/ errno
+ * @raise EINVAL if `size` is zero
  * @raise ENOMEM on tracking memory oom
- * @see mmap()
+ * @raise EDEADLK if called from signal handler interrupting mmap()
  */
 int mprotect(void *addr, size_t size, int prot) {
   int rc;

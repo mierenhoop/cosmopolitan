@@ -17,6 +17,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/state.internal.h"
+#include "libc/thread/posixthread.internal.h"
 #include "libc/thread/thread.h"
 
 void __fds_lock(void) {

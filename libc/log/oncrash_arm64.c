@@ -43,10 +43,10 @@
 #include "libc/log/log.h"
 #include "libc/macros.h"
 #include "libc/nexgen32e/stackframe.h"
-#include "libc/runtime/memtrack.internal.h"
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/stack.h"
 #include "libc/runtime/symbols.internal.h"
+#include "libc/runtime/syslib.internal.h"
 #include "libc/stdio/stdio.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/auxv.h"
@@ -184,9 +184,9 @@ static relegated char *GetSymbolName(struct SymbolTable *st, int symbol) {
   static char buf[8192];
   if (!(str = __get_symbol_name(st, symbol)))
     return str;
-  if (!__is_mangled(str))
+  if (!cosmo_is_mangled(str))
     return str;
-  __demangle(buf, str, sizeof(buf));
+  cosmo_demangle(buf, str, sizeof(buf));
   return buf;
 }
 
@@ -395,12 +395,6 @@ relegated void __oncrash(int sig, siginfo_t *si, void *arg) {
   BLOCK_CANCELATION;
   SpinLock(&lock);
   __oncrash_impl(sig, si, arg);
-
-  // unlike amd64, the instruction pointer on arm64 isn't advanced past
-  // the debugger breakpoint instruction automatically. we need this so
-  // execution can resume after __builtin_trap().
-  if (arg && sig == SIGTRAP)
-    ((ucontext_t *)arg)->uc_mcontext.PC += 4;
 
   // ensure execution doesn't resume for anything but SIGTRAP / SIGQUIT
   if (arg && sig != SIGTRAP && sig != SIGQUIT) {

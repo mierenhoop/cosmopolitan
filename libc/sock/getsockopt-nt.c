@@ -18,6 +18,9 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/assert.h"
 #include "libc/calls/struct/timeval.h"
+#include "libc/cosmotime.h"
+#include "libc/dce.h"
+#include "libc/errno.h"
 #include "libc/nt/struct/linger.h"
 #include "libc/nt/thunk/msabi.h"
 #include "libc/nt/winsock.h"
@@ -29,7 +32,8 @@
 #include "libc/sysv/consts/so.h"
 #include "libc/sysv/consts/sol.h"
 #include "libc/sysv/errfuns.h"
-#ifdef __x86_64__
+#include "libc/sysv/errno.h"
+#if SupportsWindows()
 
 __msabi extern typeof(__sys_getsockopt_nt) *const __imp_getsockopt;
 
@@ -39,7 +43,6 @@ textwindows int sys_getsockopt_nt(struct Fd *fd, int level, int optname,
   uint64_t ms;
   uint32_t in_optlen;
   struct linger_nt linger;
-  npassert(fd->kind == kFdSocket);
 
   if (out_opt_optval && inout_optlen) {
     in_optlen = *inout_optlen;
@@ -47,28 +50,35 @@ textwindows int sys_getsockopt_nt(struct Fd *fd, int level, int optname,
     in_optlen = 0;
   }
 
+  if (level == SOL_SOCKET && optname == SO_ERROR) {
+    if (in_optlen < sizeof(int))
+      return einval();
+    int err;
+    uint32_t len = sizeof(err);
+    if (__imp_getsockopt(fd->handle, SOL_SOCKET, SO_ERROR, &err, &len) == -1)
+      return __winsockerr();
+    *(int *)out_opt_optval = __errno_windows2linux(err);
+    *inout_optlen = sizeof(int);
+  }
+
   if (level == SOL_SOCKET &&
       (optname == SO_RCVTIMEO || optname == SO_SNDTIMEO)) {
-    if (in_optlen >= sizeof(struct timeval)) {
-      if (optname == SO_RCVTIMEO) {
-        ms = fd->rcvtimeo;
-      } else {
-        ms = fd->sndtimeo;
-      }
-      ((struct timeval *)out_opt_optval)->tv_sec = ms / 1000;
-      ((struct timeval *)out_opt_optval)->tv_usec = ms % 1000 * 1000;
-      *inout_optlen = sizeof(struct timeval);
-      return 0;
-    } else {
+    if (in_optlen < sizeof(struct timeval))
       return einval();
+    if (optname == SO_RCVTIMEO) {
+      ms = fd->rcvtimeo;
+    } else {
+      ms = fd->sndtimeo;
     }
+    *(struct timeval *)out_opt_optval = timeval_frommillis(ms);
+    *inout_optlen = sizeof(struct timeval);
+    return 0;
   }
 
   // TODO(jart): Use WSAIoctl?
   if (__imp_getsockopt(fd->handle, level, optname, out_opt_optval,
-                       inout_optlen) == -1) {
+                       inout_optlen) == -1)
     return __winsockerr();
-  }
 
   if (level == SOL_SOCKET) {
     if (optname == SO_LINGER && in_optlen == sizeof(struct linger)) {

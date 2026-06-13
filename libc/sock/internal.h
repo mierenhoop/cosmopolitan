@@ -2,6 +2,7 @@
 #define COSMOPOLITAN_LIBC_SOCK_INTERNAL_H_
 #include "libc/calls/struct/iovec.h"
 #include "libc/calls/struct/sigset.h"
+#include "libc/calls/struct/timespec.h"
 #include "libc/nt/struct/overlapped.h"
 #include "libc/nt/thunk/msabi.h"
 #include "libc/nt/winsock.h"
@@ -24,8 +25,6 @@ COSMOPOLITAN_C_START_
 /* ------------------------------------------------------------------------------------*/
 
 #define SOCKFD_OVERLAP_BUFSIZ 128
-
-errno_t __dos2errno(uint32_t);
 
 int32_t __sys_accept(int32_t, void *, uint32_t *, int) __wur;
 int32_t __sys_accept4(int32_t, void *, uint32_t *, int) __wur;
@@ -60,7 +59,7 @@ int sys_socketpair_nt_stream(int, int, int, int[2]) ;
 int sys_socketpair_nt_dgram(int, int, int, int[2]) ;
 */
 int sys_socketpair_nt(int, int, int, int[2]);
-int sys_select_nt(int, fd_set *, fd_set *, fd_set *, struct timeval *,
+int sys_select_nt(int, fd_set *, fd_set *, fd_set *, const struct timespec *,
                   const sigset_t *);
 
 size_t __iovec2nt(struct NtIovec[hasatleast 16], const struct iovec *, size_t);
@@ -75,6 +74,9 @@ int64_t __winsockerr(void);
 int __fixupnewsockfd(int, int);
 int64_t GetNtBaseSocket(int64_t);
 int sys_close_epoll(int);
+
+int __fixsunpath(struct sockaddr_un *, const void **, uint32_t *);
+void __unfixsunpath(void *, uint32_t *, uint32_t);
 
 COSMOPOLITAN_C_END_
 #endif /* COSMOPOLITAN_LIBC_SOCK_INTERNAL_H_ */

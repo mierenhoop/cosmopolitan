@@ -4,11 +4,14 @@
 COSMOPOLITAN_C_START_
 
 typedef struct nsync_semaphore_s_ {
-  void *sem_space[3];
+  void *sem_space;
 } nsync_semaphore;
 
 /* Initialize *s; the initial value is 0. */
 bool nsync_mu_semaphore_init(nsync_semaphore *s);
+
+/* Destroy *s. */
+void nsync_mu_semaphore_destroy(nsync_semaphore *s);
 
 /* Wait until the count of *s exceeds 0, and decrement it. */
 errno_t nsync_mu_semaphore_p(nsync_semaphore *s);

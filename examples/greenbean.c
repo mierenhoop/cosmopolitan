@@ -23,8 +23,6 @@
 #include <sys/auxv.h>
 #include <sys/socket.h>
 #include <time.h>
-#include "libc/mem/leaks.h"
-#include "libc/runtime/runtime.h"
 
 /**
  * @fileoverview greenbean lightweight threaded web server
@@ -261,7 +259,7 @@ int main(int argc, char *argv[]) {
   unassert(!sigaction(SIGTERM, &sa, 0));
 
   // you can pass the number of threads you want as the first command arg
-  threads = argc > 1 ? atoi(argv[1]) : __get_cpu_count();
+  threads = argc > 1 ? atoi(argv[1]) : cosmo_cpu_count();
   if (!(1 <= threads && threads <= 100000)) {
     tinyprint(2, "error: invalid number of threads\n", NULL);
     exit(1);
@@ -339,7 +337,7 @@ int main(int argc, char *argv[]) {
   sigaddset(&block, SIGQUIT);
   pthread_attr_t attr;
   unassert(!pthread_attr_init(&attr));
-  unassert(!pthread_attr_setstacksize(&attr, 65536));
+  unassert(!pthread_attr_setstacksize(&attr, 65536 - getpagesize()));
   unassert(!pthread_attr_setguardsize(&attr, getpagesize()));
   unassert(!pthread_attr_setsigmask_np(&attr, &block));
   unassert(!pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, 0));

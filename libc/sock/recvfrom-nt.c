@@ -17,9 +17,11 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/internal.h"
-#include "libc/intrin/fds.h"
 #include "libc/calls/struct/iovec.h"
 #include "libc/calls/struct/sigset.internal.h"
+#include "libc/dce.h"
+#include "libc/intrin/fds.h"
+#include "libc/intrin/kprintf.h"
 #include "libc/nt/struct/iovec.h"
 #include "libc/nt/winsock.h"
 #include "libc/sock/internal.h"
@@ -28,7 +30,8 @@
 #include "libc/sysv/consts/msg.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/errfuns.h"
-#ifdef __x86_64__
+#include "libc/sysv/pib.h"
+#if SupportsWindows()
 
 #define _MSG_OOB      1
 #define _MSG_PEEK     2
@@ -42,7 +45,7 @@ struct RecvFromArgs {
   struct NtIovec iovnt[16];
 };
 
-static textwindows int sys_recvfrom_nt_start(int64_t handle,
+textwindows static int sys_recvfrom_nt_start(int64_t handle,
                                              struct NtOverlapped *overlap,
                                              uint32_t *flags, void *arg) {
   struct RecvFromArgs *args = arg;
@@ -55,18 +58,22 @@ textwindows ssize_t sys_recvfrom_nt(int fd, const struct iovec *iov,
                                     size_t iovlen, uint32_t flags,
                                     void *opt_out_srcaddr,
                                     uint32_t *opt_inout_srcaddrsize) {
+
   if (flags & ~(_MSG_DONTWAIT | _MSG_OOB | _MSG_PEEK))
     return einval();
+
   ssize_t rc;
-  struct Fd *f = g_fds.p + fd;
-  sigset_t m = __sig_block();
-  bool nonblock = (f->flags & O_NONBLOCK) || (flags & _MSG_DONTWAIT);
-  flags &= ~_MSG_DONTWAIT;
-  rc = __winsock_block(f->handle, flags, nonblock, f->rcvtimeo, m,
-                       sys_recvfrom_nt_start,
+  struct Fd *f = __get_pib()->fds.p + fd;
+  sigset_t waitmask = __sig_block();
+  uint32_t addrcapacity = opt_inout_srcaddrsize ? *opt_inout_srcaddrsize : 0;
+  rc = __winsock_block(f->handle, flags & ~_MSG_DONTWAIT,
+                       (f->flags & O_NONBLOCK) || (flags & _MSG_DONTWAIT),
+                       f->rcvtimeo, waitmask, sys_recvfrom_nt_start,
                        &(struct RecvFromArgs){iov, iovlen, opt_out_srcaddr,
                                               opt_inout_srcaddrsize});
-  __sig_unblock(m);
+  if (rc != -1)
+    __unfixsunpath(opt_out_srcaddr, opt_inout_srcaddrsize, addrcapacity);
+  __sig_unblock(waitmask);
   return rc;
 }
 

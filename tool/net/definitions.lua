@@ -557,7 +557,8 @@ function OnHttpRequest() end
 ---
 ---@param status uint16
 ---@param message string
-function OnError(status, message) end
+---@param details string
+function OnError(status, message, details) end
 
 --- Hooks client connection creation.
 ---
@@ -2986,7 +2987,7 @@ function Database:db_filename(name) end
 function Database:deserialize(s) end
 
 ---@return integer error the numerical result code (or extended result code) for the most recent failed call associated with database db.
---- See http://lua.sqlite.org/index.cgi/doc/tip/doc/lsqlite3.wiki#numerical_error_and_result_codes for details.
+--- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#numerical_error_and_result_codes for details.
 ---@nodiscard
 function Database:error_code() end
 
@@ -3103,7 +3104,7 @@ function Database:nrows(sql) end
 --- representation and returns this as userdata. The returned object should be
 --- used for all further method calls in connection with this specific SQL
 --- statement.
---- See http://lua.sqlite.org/index.cgi/doc/tip/doc/lsqlite3.wiki#methods_for_prepared_statements.
+--- See https://lua.sqlite.org/home/doc/tip/doc/lsqlite3.wiki#methods_for_prepared_statements for details.
 ---@param sql string
 ---@return lsqlite3.Statement
 ---@nodiscard
@@ -4617,39 +4618,23 @@ unix = {
     O_TMPFILE = nil,
     --- @type integer fail if it's a symlink (zero on Windows)
     O_NOFOLLOW = nil,
+    --- @type integer automatically delete file upon close()
+    O_UNLINK = nil,
     --- @type integer it's complicated (zero on non-Linux/Apple)
     O_DSYNC = nil,
     --- @type integer it's complicated (zero on non-Linux/Apple)
     O_RSYNC = nil,
-    --- @type integer it's complicated (zero on non-Linux)
-    O_PATH = nil,
-    --- @type integer it's complicated (zero on non-FreeBSD)
-    O_VERIFY = nil,
-    --- @type integer it's complicated (zero on non-BSD)
-    O_SHLOCK = nil,
-    --- @type integer it's complicated (zero on non-BSD)
-    O_EXLOCK = nil,
+    --- @type integer synchronize i/o operations appropriately
+    O_SYNC = nil,
     --- @type integer don't record access time (zero on non-Linux)
     O_NOATIME = nil,
-    --- @type integer hint random access intent (zero on non-Windows)
-    O_RANDOM = nil,
-    --- @type integer hint sequential access intent (zero on non-Windows)
-    O_SEQUENTIAL = nil,
-    --- @type integer ask fs to abstract compression (zero on non-Windows)
-    O_COMPRESSED = nil,
-    --- @type integer turns on that slow performance (zero on non-Windows)
-    O_INDEXED = nil,
 
     --- @type integer
     O_ACCMODE = nil,
     --- @type integer
-    O_ASYNC = nil,
-    --- @type integer
     O_EXEC = nil,
     --- @type integer
     O_NOCTTY = nil,
-    --- @type integer
-    O_SEARCH = nil,
     --- @type integer
     O_SYNC = nil,
 
@@ -4958,6 +4943,8 @@ unix = {
 
     --- @type integer
     WNOHANG = nil,
+    --- @type integer
+    WUNTRACED = nil,
 
     --- @type integer
     W_OK = nil,
@@ -4988,21 +4975,14 @@ unix = {
 ---  - `O_EXCL`       exclusive access (see below)
 ---  - `O_APPEND`     open file for append only
 ---  - `O_NONBLOCK`   asks read/write to fail with EAGAIN rather than block
----  - `O_DIRECT`     it's complicated (not supported on Apple and OpenBSD)
 ---  - `O_DIRECTORY`  useful for stat'ing (hint on UNIX but required on NT)
----  - `O_TMPFILE`    try to make temp more secure (Linux and Windows only)
 ---  - `O_NOFOLLOW`   fail if it's a symlink (zero on Windows)
----  - `O_DSYNC`      it's complicated (zero on non-Linux/Apple)
----  - `O_RSYNC`      it's complicated (zero on non-Linux/Apple)
----  - `O_PATH`       it's complicated (zero on non-Linux)
----  - `O_VERIFY`     it's complicated (zero on non-FreeBSD)
----  - `O_SHLOCK`     it's complicated (zero on non-BSD)
----  - `O_EXLOCK`     it's complicated (zero on non-BSD)
+---  - `O_UNLINK`     automatically delete file upon close()
+---  - `O_SYNC`       makes file operations synchronize appropriately
+---  - `O_RSYNC`      synchronize read() operations
+---  - `O_DSYNC`      synchronize write() operations
+---  - `O_DIRECT`     it's complicated (not supported on Apple and OpenBSD)
 ---  - `O_NOATIME`    don't record access time (zero on non-Linux)
----  - `O_RANDOM`     hint random access intent (zero on non-Windows)
----  - `O_SEQUENTIAL` hint sequential access intent (zero on non-Windows)
----  - `O_COMPRESSED` ask fs to abstract compression (zero on non-Windows)
----  - `O_INDEXED`    turns on that slow performance (zero on non-Windows)
 ---
 ---  There are three regular combinations for the above flags:
 ---
@@ -5188,11 +5168,14 @@ function unix.fork() end
 ---     unix.execve(prog, {prog, '-hal', '.'}, {'PATH=/bin'})
 ---     unix.exit(127)
 ---
---- We automatically suffix `.com` and `.exe` for all platforms when
---- path searching. By default, the current directory is not on the
---- path. If `prog` is an absolute path, then it's returned as-is. If
---- `prog` contains slashes then it's not path searched either and will
---- be returned if it exists.
+--- If `prog` is an absolute path, then it's returned as-is. If `prog`
+--- contains slashes then it's not path searched either and will be
+--- returned if it exists. On Windows, it's recommended that you install
+--- programs from cosmos to c:/bin/ without any .exe or .com suffix, so
+--- they can be discovered like they would on UNIX. If you want to find
+--- a program like notepad on the $PATH using this function, then you
+--- need to specify "notepad.exe" so it includes the extension.
+---
 ---@param prog string
 ---@return string path
 ---@overload fun(prog: string): nil, error: unix.Errno
@@ -5758,10 +5741,7 @@ function unix.rmrf(path) end
 ---   - `O_NONBLOCK`
 ---   - `O_APPEND`
 ---   - `O_SYNC`
----   - `O_ASYNC`
 ---   - `O_NOATIME` on Linux
----   - `O_RANDOM` on Windows
----   - `O_SEQUENTIAL` on Windows
 ---   - `O_DIRECT` on Linux/FreeBSD/NetBSD/Windows
 ---
 ---   Examples of values `flags & ~unix.O_ACCMODE` won't include:
@@ -5784,10 +5764,7 @@ function unix.rmrf(path) end
 ---   - `O_NONBLOCK`
 ---   - `O_APPEND`
 ---   - `O_SYNC`
----   - `O_ASYNC`
 ---   - `O_NOATIME` on Linux
----   - `O_RANDOM` on Windows
----   - `O_SEQUENTIAL` on Windows
 ---   - `O_DIRECT` on Linux/FreeBSD/NetBSD/Windows
 ---
 ---   These values should be ignored:
@@ -7869,18 +7846,6 @@ function unix.Stat:ctim() end
 --- This provides some indication of how much physical storage a file
 --- actually consumes. For example, for small file systems, your system
 --- might report this number as being 8, which means 4096 bytes.
----
---- On Windows NT, if `O_COMPRESSED` is used for a file, then this
---- number will reflect the size *after* compression. you can use:
----
----     st = assert(unix.stat("moby.txt"))
----     print('file size is %d bytes' % {st:size()})
----     print('file takes up %d bytes of space' % {st:blocks() * 512})
----     if GetHostOs() == 'WINDOWS' and st:flags() & 0x800 then
----        print('thanks to file system compression')
----     end
----
---- To tell whether or not compression is being used on a file,
 function unix.Stat:blocks() end
 
 ---@return integer bytes Block size that underlying device uses.

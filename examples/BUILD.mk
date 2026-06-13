@@ -54,9 +54,8 @@ EXAMPLES_DIRECTDEPS =						\
 	LIBC_NEXGEN32E						\
 	LIBC_NT_ADVAPI32					\
 	LIBC_NT_IPHLPAPI					\
-	LIBC_NT_MEMORY						\
 	LIBC_NT_KERNEL32					\
-	LIBC_NT_NTDLL						\
+	LIBC_NT_MEMORY						\
 	LIBC_NT_USER32						\
 	LIBC_NT_WS2_32						\
 	LIBC_PROC						\
@@ -64,6 +63,7 @@ EXAMPLES_DIRECTDEPS =						\
 	LIBC_SOCK						\
 	LIBC_STDIO						\
 	LIBC_STR						\
+	LIBC_SYSTEM						\
 	LIBC_SYSV						\
 	LIBC_SYSV_CALLS						\
 	LIBC_TESTLIB						\
@@ -79,11 +79,15 @@ EXAMPLES_DIRECTDEPS =						\
 	THIRD_PARTY_DOUBLECONVERSION				\
 	THIRD_PARTY_GDTOA					\
 	THIRD_PARTY_GETOPT					\
+	THIRD_PARTY_HACLSTAR					\
 	THIRD_PARTY_HIREDIS					\
 	THIRD_PARTY_LIBCXX					\
+	THIRD_PARTY_LIBCXXABI					\
+	THIRD_PARTY_LIBUNWIND					\
 	THIRD_PARTY_LINENOISE					\
 	THIRD_PARTY_LUA						\
 	THIRD_PARTY_MBEDTLS					\
+	THIRD_PARTY_MINIAUDIO					\
 	THIRD_PARTY_MUSL					\
 	THIRD_PARTY_NSYNC					\
 	THIRD_PARTY_NSYNC_MEM					\
@@ -94,12 +98,10 @@ EXAMPLES_DIRECTDEPS =						\
 	THIRD_PARTY_TZ						\
 	THIRD_PARTY_VQSORT					\
 	THIRD_PARTY_XED						\
-	THIRD_PARTY_LIBCXXABI					\
-	THIRD_PARTY_LIBUNWIND					\
 	THIRD_PARTY_ZLIB					\
 	TOOL_ARGS						\
 	TOOL_BUILD_LIB						\
-	TOOL_VIZ_LIB
+	TOOL_VIZ_LIB						\
 
 EXAMPLES_DEPS :=						\
 	$(call uniq,$(foreach x,$(EXAMPLES_DIRECTDEPS),$($(x))))
@@ -149,6 +151,10 @@ o/$(MODE)/examples/nesemu1.dbg:					\
 o/$(MODE)/examples/picol.o: private				\
 		CPPFLAGS +=					\
 			-DSTACK_FRAME_UNLIMITED
+
+o/$(MODE)/examples/nesemu1.o: private				\
+		CPPFLAGS +=					\
+			-O3
 
 o/$(MODE)/examples/picol.dbg:					\
 		$(EXAMPLES_DEPS)				\

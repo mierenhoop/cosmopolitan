@@ -16,15 +16,17 @@
 // TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 // PERFORMANCE OF THIS SOFTWARE.
 
+#include "ctl/is_same.h"
 #include "ctl/shared_ptr.h"
 #include "ctl/vector.h"
-#include "libc/mem/leaks.h"
+#include "libc/cosmo.h"
 
 // #include <memory>
 // #include <vector>
 // #define ctl std
 
 using ctl::bad_weak_ptr;
+using ctl::enable_shared_from_this;
 using ctl::make_shared;
 using ctl::move;
 using ctl::shared_ptr;
@@ -65,6 +67,42 @@ struct Base
 
 struct Derived : Base
 {};
+
+class SharedThis : public enable_shared_from_this<SharedThis>
+{
+    struct Private
+    {
+        explicit Private() = default;
+    };
+
+  public:
+    SharedThis(Private)
+    {
+    }
+
+    static shared_ptr<SharedThis> create()
+    {
+        return make_shared<SharedThis>(Private());
+    }
+};
+
+class CanShareThis : public enable_shared_from_this<CanShareThis>
+{};
+
+// Sample class used to demonstrate the CTL shared_ptr's weak_self feature.
+struct Tree : ctl::weak_self_base
+{
+    ctl::shared_ptr<Tree> l, r;
+    ctl::weak_ptr<Tree> p;
+    Tree(ctl::weak_ptr<Tree> const& self, auto&& l2, auto&& r2)
+      : l(ctl::forward<decltype(l2)>(l2)), r(ctl::forward<decltype(r2)>(r2))
+    {
+        if (l)
+            l->p = self;
+        if (r)
+            r->p = self;
+    }
+};
 
 int
 main()
@@ -239,6 +277,32 @@ main()
         weak_ptr<int> y(x);
         if (!y.expired())
             return 23;
+    }
+
+    {
+        // enable_shared_from_this allows shared pointers to self.
+        auto x = SharedThis::create();
+        auto y = x->shared_from_this();
+        if (x.use_count() != 2 || x.get() != y.get())
+            return 24;
+        auto z = new CanShareThis();
+        auto w = shared_ptr<CanShareThis>(z);
+        auto v = w->shared_from_this();
+        if (w.use_count() != 2 || w.get() != v.get())
+            return 25;
+    }
+
+    if constexpr (ctl::is_same_v<shared_ptr<Tree>, ctl::shared_ptr<Tree>>) {
+        // Exercise our off-STL make_shared with weak self support.
+        auto t = ctl::make_shared<Tree>(
+          ctl::make_shared<Tree>(ctl::make_shared<Tree>(nullptr, nullptr),
+                                 nullptr),
+          ctl::make_shared<Tree>(nullptr, nullptr));
+        auto t2 = t->l->l->p.lock()->p.lock();
+        if (t.owner_before(t2) || t2.owner_before(t))
+            return 26;
+        if (!t.owner_before(t->l) && !t->l.owner_before(t))
+            return 27;
     }
 
     // TODO(mrdomino): exercise threads / races. The reference count should be

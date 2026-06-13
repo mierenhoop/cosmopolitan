@@ -1,7 +1,7 @@
 /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:2;tab-width:8;coding:utf-8 -*-│
 │ vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                               :vi │
 ╞══════════════════════════════════════════════════════════════════════════════╡
-│ Copyright 2021 Justine Alexandra Roberts Tunney                              │
+│ Copyright 2025 Justine Alexandra Roberts Tunney                              │
 │                                                                              │
 │ Permission to use, copy, modify, and/or distribute this software for         │
 │ any purpose with or without fee is hereby granted, provided that the         │
@@ -16,232 +16,192 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "dsp/core/core.h"
 #include "libc/calls/calls.h"
 #include "libc/calls/struct/rlimit.h"
+#include "libc/calls/struct/rusage.h"
+#include "libc/calls/struct/sigaction.h"
+#include "libc/calls/struct/stat.h"
 #include "libc/calls/struct/timespec.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
-#include "libc/intrin/directmap.h"
-#include "libc/intrin/safemacros.h"
-#include "libc/limits.h"
+#include "libc/nt/runtime.h"
 #include "libc/runtime/runtime.h"
-#include "libc/stdio/rand.h"
-#include "libc/stdio/stdio.h"
-#include "libc/sysv/consts/auxv.h"
+#include "libc/sock/sock.h"
+#include "libc/str/str.h"
+#include "libc/sysv/consts/af.h"
+#include "libc/sysv/consts/clock.h"
+#include "libc/sysv/consts/ipproto.h"
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
-#include "libc/sysv/consts/rlimit.h"
 #include "libc/sysv/consts/sig.h"
+#include "libc/sysv/consts/sock.h"
+#include "libc/temp.h"
 #include "libc/testlib/testlib.h"
-#include "libc/time.h"
-#include "libc/x/xsigaction.h"
-#include "libc/x/xspawn.h"
+#include "libc/thread/thread.h"
 
-#ifdef __x86_64__
-
-#define MEM (64 * 1024 * 1024)
-
-static char tmpname[PATH_MAX];
-
-void OnSigxcpu(int sig) {
-  ASSERT_EQ(SIGXCPU, sig);
-  _Exit(0);
+TEST(setrlimit, RLIMIT_AS) {
+  struct rlimit old;
+  ASSERT_SYS(0, 0, getrlimit(RLIMIT_AS, &old));
+  struct rlimit neu = old;
+  neu.rlim_cur = 0;
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_AS, &neu));
+  ASSERT_SYS(
+      ENOMEM, MAP_FAILED,
+      mmap(0, 1, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_AS, &old));
 }
 
-void OnSigxfsz(int sig) {
-  unlink(tmpname);
-  ASSERT_EQ(SIGXFSZ, sig);
-  _Exit(0);
+TEST(setrlimit, RLIMIT_NOFILE) {
+  int pfds[2];
+  struct rlimit old;
+  ASSERT_SYS(0, 0, getrlimit(RLIMIT_NOFILE, &old));
+  struct rlimit neu = old;
+  // FreeBSD dup() has a bug where RLIMIT_NOFILE is used to validate the
+  // argument, which causes it to raise EBADF if rlim_cur is set to zero
+  neu.rlim_cur = 2;
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_NOFILE, &neu));
+  ASSERT_SYS(EMFILE, -1, open("/", O_RDONLY | O_DIRECTORY));
+  ASSERT_SYS(EMFILE, -1, dup(1));
+  ASSERT_SYS(EMFILE, -1, pipe(pfds));
+  ASSERT_SYS(EMFILE, -1, socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_NOFILE, &old));
 }
 
-TEST(setrlimit, testCpuLimit) {
-  int wstatus;
-  struct rlimit rlim;
-  struct timespec start;
-  double matrices[3][3][3];
-  if (IsWindows())
-    return;  // of course it doesn't work on windows
-  if (IsXnu())
-    return;  // TODO(jart): it worked before
-  if (IsOpenbsd())
-    return;  // TODO(jart): fix flake
-  ASSERT_NE(-1, (wstatus = xspawn(0)));
-  if (wstatus == -2) {
-    ASSERT_EQ(0, xsigaction(SIGXCPU, OnSigxcpu, 0, 0, 0));
-    ASSERT_EQ(0, getrlimit(RLIMIT_CPU, &rlim));
-    rlim.rlim_cur = 1;  // set soft limit to one second
-    ASSERT_EQ(0, setrlimit(RLIMIT_CPU, &rlim));
-    start = timespec_real();
-    do {
-      matmul3(matrices[0], matrices[1], matrices[2]);
-      matmul3(matrices[0], matrices[1], matrices[2]);
-      matmul3(matrices[0], matrices[1], matrices[2]);
-      matmul3(matrices[0], matrices[1], matrices[2]);
-    } while (timespec_sub(timespec_real(), start).tv_sec < 5);
-    _Exit(1);
+volatile sig_atomic_t gotsig;
+
+void onsig(int sig) {
+  gotsig = sig;
+}
+
+TEST(setrlimit, RLIMIT_FSIZE) {
+
+  // set file size limit to zero
+  struct rlimit old;
+  ASSERT_SYS(0, 0, getrlimit(RLIMIT_FSIZE, &old));
+  struct rlimit neu = old;
+  neu.rlim_cur = 0;
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_FSIZE, &neu));
+
+  // create file
+  int fd;
+  char path[] = "/tmp/setrlimit_test.XXXXXX";
+  ASSERT_NE(-1, (fd = mkstemp(path)));
+
+  // attempt to write to file
+  signal(SIGXFSZ, onsig);
+  ASSERT_SYS(EFBIG, -1, write(fd, "x", 1));
+  ASSERT_EQ(SIGXFSZ, gotsig);
+  gotsig = 0;
+
+  // make sure data didn't get written
+  struct stat st;
+  ASSERT_SYS(0, 0, fstat(fd, &st));
+  ASSERT_EQ(0, st.st_size);
+
+  // increase file size limit
+  neu.rlim_cur = 1;
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_FSIZE, &neu));
+
+  // attempt to write to file
+  ASSERT_SYS(0, 1, write(fd, "x", 1));
+  ASSERT_EQ(0, gotsig);
+
+  // make sure file size increased
+  ASSERT_SYS(0, 0, fstat(fd, &st));
+  ASSERT_EQ(1, st.st_size);
+
+  // attempt to write to file, again
+  ASSERT_SYS(EFBIG, -1, write(fd, "x", 1));
+  ASSERT_EQ(SIGXFSZ, gotsig);
+  gotsig = 0;
+
+  // test pwrite does the right thing
+  ASSERT_SYS(0, 1, pwrite(fd, "x", 1, 0));
+  ASSERT_SYS(EFBIG, -1, pwrite(fd, "x", 1, 1));
+  ASSERT_EQ(SIGXFSZ, gotsig);
+  gotsig = 0;
+
+  // test we're allowed to seek beyond the limit
+  ASSERT_SYS(0, 2, lseek(fd, 2, SEEK_SET));
+
+  // test we're still allowed to read beyond the limit
+  neu.rlim_cur = 0;
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_FSIZE, &neu));
+  ASSERT_SYS(0, 0, lseek(fd, 0, SEEK_SET));
+  ASSERT_SYS(0, 1, read(fd, (char[]){0}, 1));
+  ASSERT_SYS(0, 1, pread(fd, (char[]){0}, 1, 0));
+  ASSERT_EQ(0, gotsig);
+
+  // remove file
+  ASSERT_SYS(0, 0, close(fd));
+  ASSERT_SYS(0, 0, unlink(path));
+
+  // restore limit
+  ASSERT_SYS(0, 0, setrlimit(RLIMIT_FSIZE, &old));
+}
+
+void *rlimit_cpu_soft_fork_test(void *) {
+  int child;
+  ASSERT_NE(-1, (child = fork()));
+  if (!child) {
+    ASSERT_SYS(0, 0, setrlimit(RLIMIT_CPU, &(struct rlimit){1, 10}));
+    for (;;)
+      pthread_yield_np();
   }
-  EXPECT_TRUE(WIFEXITED(wstatus));
-  EXPECT_FALSE(WIFSIGNALED(wstatus));
-  EXPECT_EQ(0, WEXITSTATUS(wstatus));
-  EXPECT_EQ(0, WTERMSIG(wstatus));
-}
-
-TEST(setrlimit, testFileSizeLimit) {
-  char junkdata[512];
-  int i, fd, wstatus;
-  struct rlimit rlim;
-  if (IsWindows())
-    return; /* of course it doesn't work on windows */
-  ASSERT_NE(-1, (wstatus = xspawn(0)));
-  if (wstatus == -2) {
-    ASSERT_EQ(0, xsigaction(SIGXFSZ, OnSigxfsz, 0, 0, 0));
-    ASSERT_EQ(0, getrlimit(RLIMIT_FSIZE, &rlim));
-    rlim.rlim_cur = 1024 * 1024; /* set soft limit to one megabyte */
-    ASSERT_EQ(0, setrlimit(RLIMIT_FSIZE, &rlim));
-    snprintf(tmpname, sizeof(tmpname), "%s/%s.%d",
-             firstnonnull(getenv("TMPDIR"), "/tmp"),
-             firstnonnull(program_invocation_short_name, "unknown"), getpid());
-    ASSERT_NE(-1, (fd = open(tmpname, O_RDWR | O_CREAT | O_TRUNC, 0644)));
-    rngset(junkdata, 512, _rand64, -1);
-    for (i = 0; i < 5 * 1024 * 1024 / 512; ++i) {
-      ASSERT_EQ(512, write(fd, junkdata, 512));
-    }
-    close(fd);
-    unlink(tmpname);
-    _Exit(1);
-  }
-  EXPECT_TRUE(WIFEXITED(wstatus));
-  EXPECT_FALSE(WIFSIGNALED(wstatus));
-  EXPECT_EQ(0, WEXITSTATUS(wstatus));
-  EXPECT_EQ(0, WTERMSIG(wstatus));
-}
-
-int SetMemoryLimit(size_t n) {
-  struct rlimit rlim = {0};
-  getrlimit(RLIMIT_AS, &rlim);
-  rlim.rlim_cur = n;
-  rlim.rlim_max = n;
-  return setrlimit(RLIMIT_AS, &rlim);
-}
-
-TEST(setrlimit, testMemoryLimit) {
-  char *p;
-  bool gotsome;
-  int i, wstatus;
-  ASSERT_NE(-1, (wstatus = xspawn(0)));
-  if (wstatus == -2) {
-    ASSERT_EQ(0, SetMemoryLimit(MEM));
-    for (gotsome = false, i = 0; i < (MEM * 2) / getpagesize(); ++i) {
-      p = mmap(0, getpagesize(), PROT_READ | PROT_WRITE,
-               MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-      if (p != MAP_FAILED) {
-        gotsome = true;
-      } else {
-        ASSERT_TRUE(gotsome);
-        ASSERT_EQ(ENOMEM, errno);
-        _Exit(0);
-      }
-      rngset(p, getpagesize(), _rand64, -1);
-    }
-    _Exit(1);
-  }
-  EXPECT_TRUE(WIFEXITED(wstatus));
-  EXPECT_FALSE(WIFSIGNALED(wstatus));
-  EXPECT_EQ(0, WEXITSTATUS(wstatus));
-  EXPECT_EQ(0, WTERMSIG(wstatus));
-}
-
-TEST(setrlimit, testVirtualMemoryLimit) {
-  char *p;
-  int i, wstatus;
-  ASSERT_NE(-1, (wstatus = xspawn(0)));
-  if (wstatus == -2) {
-    ASSERT_EQ(0, setrlimit(RLIMIT_AS, &(struct rlimit){MEM, MEM}));
-    for (i = 0; i < (MEM * 2) / getpagesize(); ++i) {
-      p = sys_mmap(0, getpagesize(), PROT_READ | PROT_WRITE,
-                   MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE, -1, 0)
-              .addr;
-      if (p == MAP_FAILED) {
-        ASSERT_EQ(ENOMEM, errno);
-        _Exit(0);
-      }
-      rngset(p, getpagesize(), _rand64, -1);
-    }
-    _Exit(1);
-  }
-  EXPECT_TRUE(WIFEXITED(wstatus));
-  EXPECT_FALSE(WIFSIGNALED(wstatus));
-  EXPECT_EQ(0, WEXITSTATUS(wstatus));
-  EXPECT_EQ(0, WTERMSIG(wstatus));
-}
-
-TEST(setrlimit, testDataMemoryLimit) {
-  char *p;
-  int i, wstatus;
-  if (IsXnu())
-    return; /* doesn't work on darwin */
-  if (IsNetbsd())
-    return; /* doesn't work on netbsd */
-  if (IsFreebsd())
-    return; /* doesn't work on freebsd */
-  if (IsLinux())
-    return; /* doesn't work on gnu/systemd */
-  if (IsWindows())
-    return; /* of course it doesn't work on windows */
-  ASSERT_NE(-1, (wstatus = xspawn(0)));
-  if (wstatus == -2) {
-    ASSERT_EQ(0, setrlimit(RLIMIT_DATA, &(struct rlimit){MEM, MEM}));
-    for (i = 0; i < (MEM * 2) / getpagesize(); ++i) {
-      p = sys_mmap(0, getpagesize(), PROT_READ | PROT_WRITE,
-                   MAP_ANONYMOUS | MAP_PRIVATE | MAP_POPULATE, -1, 0)
-              .addr;
-      if (p == MAP_FAILED) {
-        ASSERT_EQ(ENOMEM, errno);
-        _Exit(0);
-      }
-      rngset(p, getpagesize(), _rand64, -1);
-    }
-    _Exit(1);
-  }
-  EXPECT_TRUE(WIFEXITED(wstatus));
-  EXPECT_FALSE(WIFSIGNALED(wstatus));
-  EXPECT_EQ(0, WEXITSTATUS(wstatus));
-  EXPECT_EQ(0, WTERMSIG(wstatus));
-}
-
-TEST(setrlimit, testPhysicalMemoryLimit) {
-  /* RLIMIT_RSS doesn't work on gnu/systemd */
-  /* RLIMIT_RSS doesn't work on darwin */
-  /* RLIMIT_RSS doesn't work on freebsd */
-  /* RLIMIT_RSS doesn't work on netbsd */
-  /* RLIMIT_RSS doesn't work on openbsd */
-  /* of course it doesn't work on windows */
-}
-
-wontreturn void OnVfork(void *ctx) {
-  struct rlimit *rlim;
-  rlim = ctx;
-  rlim->rlim_cur -= 1;
-  ASSERT_EQ(0, getrlimit(RLIMIT_CPU, rlim));
-  _Exit(0);
-}
-
-TEST(setrlimit, isVforkSafe) {
   int ws;
-  struct rlimit rlim[2];
-  if (IsWindows())
-    return; /* of course it doesn't work on windows */
-  ASSERT_EQ(0, getrlimit(RLIMIT_CPU, rlim));
-  ASSERT_NE(-1, (ws = xvspawn(OnVfork, rlim, 0)));
-  EXPECT_TRUE(WIFEXITED(ws));
-  EXPECT_FALSE(WIFSIGNALED(ws));
-  EXPECT_EQ(0, WEXITSTATUS(ws));
-  EXPECT_EQ(0, WTERMSIG(ws));
-  ASSERT_EQ(0, getrlimit(RLIMIT_CPU, rlim + 1));
-  EXPECT_EQ(rlim[0].rlim_cur, rlim[1].rlim_cur);
-  EXPECT_EQ(rlim[0].rlim_max, rlim[1].rlim_max);
+  ASSERT_NE(-1, wait(&ws));
+  ASSERT_TRUE(WIFSIGNALED(ws));
+  ASSERT_TRUE(WTERMSIG(ws) == SIGKILL || WTERMSIG(ws) == SIGXCPU);
+  return 0;
 }
 
-#endif /* __x86_64__ */
+void *rlimit_cpu_hard_fork_test(void *) {
+  int child;
+  ASSERT_NE(-1, (child = fork()));
+  if (!child) {
+    ASSERT_SYS(0, 0, setrlimit(RLIMIT_CPU, &(struct rlimit){1, 1}));
+    for (;;)
+      pthread_yield_np();
+  }
+  int ws;
+  ASSERT_NE(-1, wait(&ws));
+  ASSERT_TRUE(WIFSIGNALED(ws));
+  ASSERT_TRUE(WTERMSIG(ws) == SIGKILL || WTERMSIG(ws) == SIGXCPU);
+  return 0;
+}
+
+__attribute__((__constructor__)) static void init(void) {
+  if (__argc == 2 && !strcmp(__argv[1], "--hammer-time"))
+    for (;;)
+      pthread_yield_np();
+}
+
+void *rlimit_cpu_hard_exec_test(void *) {
+  int child;
+  // TODO(jart): Why does vfork() here rarely deadlock on Windows?
+  ASSERT_NE(-1, (child = fork()));
+  if (!child) {
+    ASSERT_SYS(0, 0, setrlimit(RLIMIT_CPU, &(struct rlimit){1, 1}));
+    const char *prog = GetProgramExecutableName();
+    execl(prog, prog, "--hammer-time", NULL);
+    _Exit(127);
+  }
+  int ws;
+  ASSERT_NE(-1, wait(&ws));
+  ASSERT_TRUE(WIFSIGNALED(ws));
+  ASSERT_TRUE(WTERMSIG(ws) == SIGKILL || WTERMSIG(ws) == SIGXCPU);
+  return 0;
+}
+
+TEST(setrlimit, RLIMIT_CPU) {
+  if (IsXnu())
+    return;  // TOOD: Why doesn't RLIMIT_CPU on XNU work?
+  pthread_t th1, th2, th3;
+  ASSERT_EQ(0, pthread_create(&th1, 0, rlimit_cpu_soft_fork_test, 0));
+  ASSERT_EQ(0, pthread_create(&th2, 0, rlimit_cpu_hard_fork_test, 0));
+  ASSERT_EQ(0, pthread_create(&th3, 0, rlimit_cpu_hard_exec_test, 0));
+  ASSERT_EQ(0, pthread_join(th1, 0));
+  ASSERT_EQ(0, pthread_join(th2, 0));
+  ASSERT_EQ(0, pthread_join(th3, 0));
+}

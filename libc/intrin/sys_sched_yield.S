@@ -20,13 +20,11 @@
 #include "libc/sysv/consts/nr.h"
 #include "libc/macros.h"
 
-//	Relinquishes scheduled quantum.
-//
-//	@return	0 on success, or -1 w/ errno
+//	use pthread_yield_np() instead
 sys_sched_yield:
+	beg
 #ifdef __x86_64__
-	push	%rbp
-	mov	%rsp,%rbp
+	pro
 	xor	%eax,%eax
 	mov	__hostos(%rip),%dl
 
@@ -84,13 +82,18 @@ sys_sched_yield:
 //	fails a positive or negative errno might get returned.
 #endif
 
-9:	leave
+9:	epi
 	ret
 
 #elif defined(__aarch64__)
 
+//	todo: might be broken on xnu silicon
+
 	stp	x29,x30,[sp,-32]!
 	mov	x29,sp
+	.cfi_adjust_cfa_offset 32
+	.cfi_rel_offset x29,16
+	.cfi_rel_offset x30,24
 	mov	x3,0
 	mov	x2,0
 	add	x4,sp,16
@@ -101,10 +104,14 @@ sys_sched_yield:
 	mov	x16,#0x5d			// select(0,0,0,0,&blah) for xnu
 	svc	0
 	ldp	x29,x30,[sp],32
+	.cfi_adjust_cfa_offset -32
+	.cfi_restore x30
+	.cfi_restore x29
 	ret
 
 #else
 #error "arch unsupported"
 #endif
+	end
 	.endfn	sys_sched_yield,globl
 	.previous

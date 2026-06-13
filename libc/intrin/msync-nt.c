@@ -17,38 +17,74 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/syscall-nt.internal.h"
+#include "libc/intrin/dll.h"
 #include "libc/intrin/maps.h"
 #include "libc/nt/memory.h"
-#include "libc/nt/runtime.h"
 #include "libc/runtime/runtime.h"
 #include "libc/stdio/sysparam.h"
-#include "libc/sysv/consts/auxv.h"
+#include "libc/sysv/consts/map.h"
 #include "libc/sysv/errfuns.h"
+
+#define SYNCRANGE_CONTAINER(e) DLL_CONTAINER(struct SyncRange, elem, e)
+
+struct SyncRange {
+  char *data;
+  size_t size;
+  struct Dll elem;
+};
+
+textwindows static void *sys_msync_nt_malloc(size_t size) {
+  return HeapAlloc(GetProcessHeap(), 0, size);
+}
+
+textwindows static void sys_msync_nt_free(void *ptr) {
+  HeapFree(GetProcessHeap(), 0, ptr);
+}
 
 textwindows int sys_msync_nt(char *addr, size_t size, int flags) {
 
-  int pagesz = __pagesize;
-  size = (size + pagesz - 1) & -pagesz;
-
-  if ((uintptr_t)addr & (pagesz - 1))
+  // validate arguments
+  if ((uintptr_t)addr & (__pagesize - 1))
     return einval();
 
-  int rc = 0;
-  if (__maps_lock()) {
-    rc = edeadlk();
-  } else {
-    struct Map *map, *floor;
-    floor = __maps_floor(addr);
-    for (map = floor; map && map->addr <= addr + size; map = __maps_next(map)) {
-      char *beg = MAX(addr, map->addr);
-      char *end = MIN(addr + size, map->addr + map->size);
-      if (beg < end)
-        if (!FlushViewOfFile(beg, end - beg))
-          rc = -1;
-      // TODO(jart): FlushFileBuffers too on g_fds handle if MS_SYNC?
+  // round up size
+  size += __pagesize - 1;
+  size &= -__pagesize;
+
+  // create list planning which ranges we need to sync
+  __maps_lock();
+  struct Map *map;
+  struct Dll *ranges = 0;
+  if (!(map = __maps_floor(addr)))
+    map = __maps_first();
+  for (; map && map->addr <= addr + size; map = __maps_next(map)) {
+    if (map->flags & MAP_ANONYMOUS)
+      continue;  // msync() is about coherency between file and memory
+    char *beg = MAX(addr, map->addr);
+    char *end = MIN(addr + size, map->addr + map->size);
+    if (beg >= end)
+      continue;  // didn't overlap mapping
+    struct SyncRange *range;
+    if ((range = sys_msync_nt_malloc(sizeof(*range)))) {
+      range->data = beg;
+      range->size = end - beg;
+      dll_init(&range->elem);
+      dll_make_first(&ranges, &range->elem);
     }
   }
   __maps_unlock();
+
+  // perform the i/o operation
+  int rc = 0;
+  struct Dll *e, *e2;
+  for (e = dll_first(ranges); e; e = e2) {
+    e2 = dll_next(ranges, e);
+    struct SyncRange *range = SYNCRANGE_CONTAINER(e);
+    if (!FlushViewOfFile(range->data, range->size))
+      rc = -1;
+    // TODO(jart): FlushFileBuffers too on fd handle if MS_SYNC?
+    sys_msync_nt_free(range);
+  }
 
   return rc;
 }

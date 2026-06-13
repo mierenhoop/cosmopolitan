@@ -17,12 +17,22 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/str/str.h"
+#include "libc/assert.h"
+#include "libc/calls/calls.h"
+#include "libc/ctype.h"
 #include "libc/dce.h"
+#include "libc/intrin/safemacros.h"
 #include "libc/mem/alg.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
 #include "libc/nexgen32e/x86feature.h"
+#include "libc/runtime/runtime.h"
+#include "libc/runtime/sysconf.h"
+#include "libc/stdio/rand.h"
+#include "libc/stdio/stdio.h"
 #include "libc/str/tab.h"
+#include "libc/sysv/consts/map.h"
+#include "libc/sysv/consts/prot.h"
 #include "libc/testlib/ezbench.h"
 #include "libc/testlib/hyperion.h"
 #include "libc/testlib/testlib.h"
@@ -40,13 +50,74 @@ char *strcasestr_naive(const char *haystack, const char *needle) {
         return (/*unconst*/ char *)haystack;
       if (!haystack[i])
         break;
-      if (kToLower[needle[i] & 255] != kToLower[haystack[i] & 255])
+      if (tolower(needle[i]) != tolower(haystack[i]))
         break;
     }
     if (!*haystack++)
       break;
   }
   return 0;
+}
+
+TEST(strcasestr, tester) {
+  const char *haystack = "Windows";
+  ASSERT_STREQ(haystack, strcasestr(haystack, "win"));
+}
+
+void print_char_array(const char *s, const char *name) {
+  printf("char %s[] = {\n", name);
+  int len = 0;
+  while (s[len])
+    len++;
+  len++;  // include null terminator
+  for (int i = 0; i < len; i++) {
+    unsigned char c = s[i];
+    if (i % 8 == 0)
+      printf("    ");
+    if (c == 0) {
+      printf("0");
+    } else if (isprint(c) && c != '\'' && c != '\\') {
+      printf("'%c'", c);
+    } else if (c == '\'' || c == '\\') {
+      printf("'\\%c'", c);
+    } else {
+      printf("%d", c);
+    }
+    if (i < len - 1)
+      printf(",");
+    if (i % 8 == 7 || i == len - 1) {
+      int start = i - (i % 8);
+      printf(" // 0x%x\n", start);
+    }
+  }
+  printf("};\n");
+}
+
+TEST(strcasestr, safety) {
+  int pagesz = sysconf(_SC_PAGESIZE);
+  char *map = (char *)mmap(0, pagesz * 2, PROT_READ | PROT_WRITE,
+                           MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  npassert(map != MAP_FAILED);
+  npassert(!mprotect(map + pagesz, pagesz, PROT_NONE));
+  for (int haylen = 1; haylen < 128; ++haylen) {
+    char *hay = map + pagesz - (haylen + 1);
+    for (int i = 0; i < haylen; ++i)
+      hay[i] = max(rand() & 255, 1);
+    hay[haylen] = 0;
+    for (int neelen = 1; neelen < haylen; ++neelen) {
+      char *nee = hay + (haylen + 1) - (neelen + 1);
+      if (strcasestr_naive(hay, nee) != strcasestr(hay, nee)) {
+        print_char_array(hay, "hay");
+        print_char_array(nee, "nee");
+        printf("wut hay  = %`'s\n", hay);
+        printf("wut nee  = %`'s\n", nee);
+        printf("wut res1 = %`'s\n", strcasestr_naive(hay, nee));
+        printf("wut res2 = %`'s\n", strcasestr(hay, nee));
+      }
+      ASSERT_EQ(strcasestr_naive(hay, nee), strcasestr(hay, nee));
+    }
+  }
+  munmap(map, pagesz * 2);
 }
 
 TEST(strcasestr, test_emptyString_isFoundAtBeginning) {
@@ -114,14 +185,14 @@ TEST(strcasestr, test) {
  *     strstr torture 16   l:     4,559c     1,473ns   m:     3,614c     1,167ns
  *     strstr torture 32   l:     5,324c     1,720ns   m:     5,577c     1,801ns
  *
- *     strcasestr naive    l:   129,908c    41,959ns   m:   155,420c    50,200ns
- *     strcasestr          l:    33,464c    10,809ns   m:    31,636c    10,218ns
- *     strcasestr tort 1   l:        38c        12ns   m:        69c        22ns
- *     strcasestr tort 2   l:     2,544c       822ns   m:     2,580c       833ns
- *     strcasestr tort 4   l:     2,745c       887ns   m:     2,767c       894ns
- *     strcasestr tort 8   l:     4,198c     1,356ns   m:     4,216c     1,362ns
- *     strcasestr tort 16  l:     7,402c     2,391ns   m:     7,487c     2,418ns
- *     strcasestr tort 32  l:    13,772c     4,448ns   m:    12,945c     4,181ns
+ *     strcasestr naive    l:   181,732c    60,577ns   m:   185,100c    61,700ns
+ *     strcasestr          l:     9,870c     3,290ns   m:     9,871c     3,290ns
+ *     strcasestr tort 1   l:        93c        31ns   m:       138c        46ns
+ *     strcasestr tort 2   l:        21c         7ns   m:        81c        27ns
+ *     strcasestr tort 4   l:       606c       202ns   m:       676c       225ns
+ *     strcasestr tort 8   l:       602c       201ns   m:       658c       219ns
+ *     strcasestr tort 16  l:       614c       205ns   m:       671c       224ns
+ *     strcasestr tort 32  l:       674c       225ns   m:       715c       238ns
  */
 BENCH(strcasestr, bench) {
   EZBENCH2("strcasestr naive", donothing,

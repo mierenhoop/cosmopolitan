@@ -31,7 +31,7 @@ typedef uint32_t code_t;
 #error "unsupported architecture"
 #endif
 
-static privileged bool IsVirginFunction(const code_t *func) {
+__privileged static bool IsVirginFunction(const code_t *func) {
 #ifdef __x86_64__
   long i;
   // function must be preceeded by 9 nops
@@ -57,7 +57,7 @@ static privileged bool IsVirginFunction(const code_t *func) {
 #endif
 }
 
-static privileged void HookFunction(code_t *func, void *dest) {
+__privileged static void HookFunction(code_t *func, void *dest) {
   long dp;
 #ifdef __x86_64__
   dp = (intptr_t)dest - (intptr_t)(func - 7 + 5);
@@ -112,13 +112,14 @@ static privileged void HookFunction(code_t *func, void *dest) {
  * @param st can be obtained using `GetSymbolTable()`
  * @see ape/ape.lds
  */
-privileged int __hook(void *dest, struct SymbolTable *st) {
+__privileged int __hook(void *dest, struct SymbolTable *st) {
   long i;
   code_t *p, *pe;
   intptr_t lowest;
   if (!st)
     return -1;
   __morph_begin();
+  __jit_begin();
   lowest = MAX((intptr_t)__executable_start, (intptr_t)_ereal);
   for (i = 0; i < st->count; ++i) {
     if (st->symbols[i].x < 9)
@@ -138,6 +139,9 @@ privileged int __hook(void *dest, struct SymbolTable *st) {
       // kprintf("can't hook %t at %lx\n", p, p);
     }
   }
+  __clear_cache(MAX((char *)__executable_start, (char *)_ereal),
+                MIN((char *)__privileged_start, (char *)_etext));
+  __jit_end();
   __morph_end();
   return 0;
 }

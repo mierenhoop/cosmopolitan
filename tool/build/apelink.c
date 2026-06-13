@@ -41,16 +41,16 @@
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/symbols.internal.h"
 #include "libc/serialize.h"
-#include "libc/stdalign.h"
 #include "libc/stdckdint.h"
 #include "libc/stdio/stdio.h"
-#include "libc/str/blake2.h"
+#include "libc/stdio/sysparam.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
 #include "libc/zip.h"
 #include "third_party/getopt/getopt.internal.h"
+#include "third_party/haclstar/haclstar.h"
 #include "third_party/zlib/zlib.h"
 #include "tool/build/lib/lib.h"
 
@@ -84,6 +84,13 @@
   "             if no ape loaders are specified then your\n"   \
   "             executable will self-modify its header on\n"   \
   "             the first run, to use the platform format\n"   \
+  "\n"                                                         \
+  "  -k KERNEL  test for maching kernel name [repeatable]\n"   \
+  "             when set, the shell script for subsequent\n"   \
+  "             loader executables will check if uname -s\n"   \
+  "             output matches the kernel string, only if\n"   \
+  "             the loader executable architecture is not\n"   \
+  "             an architecture in the input binary list\n"    \
   "\n"                                                         \
   "  -M PATH    bundle ape loader source code file for m1\n"   \
   "             processors running the xnu kernel so that\n"   \
@@ -150,6 +157,8 @@
   "             shall be merged into a single output file\n"   \
   "\n"
 
+#define BLAKE2B256_DIGEST_LENGTH 32
+
 #define ALIGN(p, a) (char *)ROUNDUP((uintptr_t)(p), (a))
 
 enum Strategy {
@@ -213,6 +222,7 @@ struct Loader {
   char *ddarg_size1;
   char *ddarg_skip2;
   char *ddarg_size2;
+  const char *kernel;
 };
 
 struct Loaders {
@@ -233,7 +243,7 @@ struct Assets {
 };
 
 static int outfd;
-static int hashes;
+static long hashes;
 static const char *prog;
 static bool want_stripped;
 static int support_vector;
@@ -244,12 +254,13 @@ static struct Inputs inputs;
 static char ape_heredoc[15];
 static enum Strategy strategy;
 static struct Loaders loaders;
+static const char *loader_kernel;
 static const char *custom_sh_code;
 static bool force_bypass_binfmt_misc;
 static bool generate_debuggable_binary;
 static bool dont_path_lookup_ape_loader;
+static Hacl_Hash_Blake2b_state_t *hasher;
 _Alignas(4096) static char prologue[1048576];
-static uint8_t hashpool[BLAKE2B256_DIGEST_LENGTH];
 static const char *macos_silicon_loader_source_path;
 static const char *macos_silicon_loader_source_text;
 static char *macos_silicon_loader_source_ddarg_skip;
@@ -260,24 +271,22 @@ static Elf64_Xword notesize;
 
 static char *r_off32_e_lfanew;
 
-#include "libc/mem/tinymalloc.inc"
-
-static wontreturn void Die(const char *thing, const char *reason) {
+[[noreturn]] static void Die(const char *thing, const char *reason) {
   tinyprint(2, thing, ": ", reason, "\n", NULL);
   exit(1);
 }
 
-static wontreturn void DieSys(const char *thing) {
+[[noreturn]] static void DieSys(const char *thing) {
   perror(thing);
   exit(1);
 }
 
-static wontreturn void ShowUsage(int rc, int fd) {
+[[noreturn]] static void ShowUsage(int rc, int fd) {
   tinyprint(fd, "USAGE\n\n  ", prog, MANUAL, NULL);
   exit(rc);
 }
 
-static wontreturn void DieOom(void) {
+[[noreturn]] static void DieOom(void) {
   Die("apelink", "out of memory");
 }
 
@@ -349,20 +358,15 @@ static bool IsBinary(const char *p, size_t n) {
   return false;
 }
 
-static void BlendHashes(uint8_t out[static BLAKE2B256_DIGEST_LENGTH],
-                        uint8_t inp[static BLAKE2B256_DIGEST_LENGTH]) {
-  int i;
-  for (i = 0; i < BLAKE2B256_DIGEST_LENGTH; ++i) {
-    out[i] ^= inp[i];
-  }
-}
-
 static void HashInput(const void *data, size_t size) {
-  uint8_t digest[BLAKE2B256_DIGEST_LENGTH];
-  uint32_t hash = crc32_z(hashes, data, size);  // 30 GB/s
-  BLAKE2B256(&hash, sizeof(hash), digest);      // .6 GB/s
-  BlendHashes(hashpool, digest);
-  ++hashes;
+  const uint8_t *bytes = data;
+  uint32_t amt, chunk_size = 0x7ffff000;
+  Hacl_Hash_Blake2b_update(hasher, &size, sizeof(size));
+  for (size_t i = 0; i < size; i += amt) {
+    amt = MIN(size - i, chunk_size);
+    Hacl_Hash_Blake2b_update(hasher, bytes + i, amt);
+    ++hashes;
+  }
 }
 
 static void HashInputString(const char *str) {
@@ -981,13 +985,19 @@ static void AddLoader(const char *path) {
   if (loaders.n == ARRAYLEN(loaders.p)) {
     Die(prog, "too many loaders");
   }
-  loaders.p[loaders.n++].path = path;
+  struct Loader *loader = &loaders.p[loaders.n++];
+  loader->path = path;
+  loader->kernel = loader_kernel;
+}
+
+static void SetLoaderKernel(const char *kernel) {
+  loader_kernel = kernel;
 }
 
 static void GetOpts(int argc, char *argv[]) {
   int opt, bits;
   bool got_support_vector = false;
-  while ((opt = getopt(argc, argv, "hvgsGBo:l:S:M:V:")) != -1) {
+  while ((opt = getopt(argc, argv, "hvgsGBo:l:k:S:M:V:")) != -1) {
     switch (opt) {
       case 'o':
         outpath = optarg;
@@ -1010,6 +1020,10 @@ static void GetOpts(int argc, char *argv[]) {
       case 'l':
         HashInputString("-l");
         AddLoader(optarg);
+        break;
+      case 'k':
+        HashInputString("-k");
+        SetLoaderKernel(optarg);
         break;
       case 'S':
         HashInputString("-S");
@@ -1275,7 +1289,9 @@ static char *DefineMachoUuid(char *p) {
   load->size = sizeof(*load);
   if (!hashes)
     Die(outpath, "won't generate macho uuid");
-  memcpy(load->uuid, hashpool, sizeof(load->uuid));
+  uint8_t digest[32];
+  Hacl_Hash_Blake2b_digest(hasher, digest);
+  memcpy(load->uuid, digest, sizeof(load->uuid));
   return p + sizeof(*load);
 }
 
@@ -1632,6 +1648,30 @@ static char *GenerateScriptIfMachine(char *p, struct Input *in) {
   }
 }
 
+static char *GenerateScriptIfLoaderMachine(char *p, struct Loader *loader) {
+  if (loader->machine == EM_NEXGEN32E) {
+    p = stpcpy(p, "if [ \"$m\" = x86_64 ] || [ \"$m\" = amd64 ]");
+  } else if (loader->machine == EM_AARCH64) {
+    p = stpcpy(
+        p,
+        "if [ \"$m\" = aarch64 ] || [ \"$m\" = arm64 ] || [ \"$m\" = evbarm ]");
+  } else if (loader->machine == EM_PPC64) {
+    p = stpcpy(p, "if [ \"$m\" = ppc64le ]");
+  } else if (loader->machine == EM_MIPS) {
+    p = stpcpy(p, "if [ \"$m\" = mips64 ]");
+  } else {
+    Die(loader->path, "unsupported cpu architecture");
+  }
+
+  if (loader->kernel) {
+    p = stpcpy(p, " && [ \"$k\" = ");
+    p = stpcpy(p, loader->kernel);
+    p = stpcpy(p, " ]");
+  }
+
+  return stpcpy(p, "; then\n");
+}
+
 static char *FinishGeneratingDosHeader(char *p) {
   p = WRITE16LE(p, 0x1000);  // 10: MZ: lowers upper bound load / 16
   p = WRITE16LE(p, 0xf800);  // 12: MZ: roll greed on bss
@@ -1660,7 +1700,9 @@ static char *FinishGeneratingDosHeader(char *p) {
   // scanning over the actually portable executable mz stub can use that
   char *q = ape_heredoc;
   q = stpcpy(q, "justine");
-  uint64_t w = READ64LE(hashpool);
+  uint8_t digest[32];
+  Hacl_Hash_Blake2b_digest(hasher, digest);
+  uint64_t w = READ64LE(digest);
   for (int i = 0; i < 6; ++i) {
     *q++ = "0123456789abcdefghijklmnopqrstuvwxyz"[w % 36];
     w /= 36;
@@ -1851,6 +1893,10 @@ int main(int argc, char *argv[]) {
   if (!prog)
     prog = "apelink";
 
+  // setup objs
+  if (!(hasher = Hacl_Hash_Blake2b_malloc_256()))
+    DieOom();
+
   // process flags
   GetOpts(argc, argv);
 
@@ -1881,7 +1927,14 @@ int main(int argc, char *argv[]) {
     for (j = i + 1; j < loaders.n; ++j) {
       if (loaders.p[i].os == loaders.p[j].os &&
           loaders.p[i].machine == loaders.p[j].machine) {
-        Die(prog, "multiple ape loaders specified for the same platform");
+        if (!loaders.p[i].kernel && !loaders.p[j].kernel) {
+          Die(prog, "multiple ape loaders specified for the same platform");
+        }
+        if (loaders.p[i].kernel != NULL && loaders.p[j].kernel != NULL &&
+            strcmp(loaders.p[i].kernel, loaders.p[j].kernel) == 0) {
+          Die(prog, "multiple ape loaders specified for the same platform "
+                    "with matching kernels");
+        }
       }
     }
   }
@@ -1939,9 +1992,11 @@ int main(int argc, char *argv[]) {
       p = stpcpy(p, "MZqFpD='\n\n");
       p = FinishGeneratingDosHeader(p);
     } else {
-      p = stpcpy(p, "jartsr='\n\n");
       if (support_vector & _HOSTMETAL) {
+        p = stpcpy(p, "jartsr='\n\n");
         p = FinishGeneratingDosHeader(p);
+      } else {
+        p = stpcpy(p, "jartsr=\n");
       }
     }
     if (support_vector & _HOSTMETAL) {
@@ -2192,6 +2247,36 @@ int main(int argc, char *argv[]) {
         gotsome = true;
       }
     }
+
+    // extract the ape loader for non-input architectures
+    // if the user requested a host kernel check, get the host kernel
+    if (loader_kernel) {
+      p = stpcpy(p, "k=$(uname -s 2>/dev/null) || k=unknown\n");
+    }
+    for (i = 0; i < loaders.n; ++i) {
+      struct Loader *loader = loaders.p + i;
+      if (loader->used) {
+        continue;
+      }
+      loader->used = true;
+      p = GenerateScriptIfLoaderMachine(p, loader);
+      p = stpcpy(p, "mkdir -p \"${t%/*}\" ||exit\n"
+                    "dd if=\"$o\"");
+      p = stpcpy(p, " skip=");
+      loader->ddarg_skip2 = p;
+      p = GenerateDecimalOffsetRelocation(p);
+      p = stpcpy(p, " count=");
+      loader->ddarg_size2 = p;
+      p = GenerateDecimalOffsetRelocation(p);
+      p = stpcpy(p, " bs=1 2>/dev/null | gzip -dc >\"$t.$$\" ||exit\n"
+                    "chmod 755 \"$t.$$\" ||exit\n"
+                    "mv -f \"$t.$$\" \"$t\" ||exit\n");
+      p = stpcpy(p, "exec \"$t\" \"$o\" \"$@\"\n"
+                    "fi\n");
+      gotsome = true;
+    }
+
+    // close if-statements
     if (inputs.n && (support_vector & _HOSTXNU)) {
       if (!gotsome) {
         p = stpcpy(p, "true\n");
@@ -2267,7 +2352,10 @@ int main(int argc, char *argv[]) {
   // write the header
   Pwrite(prologue, prologue_bytes, 0);
 
-  if (close(outfd)) {
+  // finish output
+  if (close(outfd))
     DieSys(outpath);
-  }
+
+  // free memory
+  Hacl_Hash_Blake2b_free(hasher);
 }

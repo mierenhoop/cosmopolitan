@@ -47,6 +47,21 @@ $(LIBC_STR_A).pkg:						\
 		$(LIBC_STR_A_OBJS)				\
 		$(foreach x,$(LIBC_STR_A_DIRECTDEPS),$($(x)_A).pkg)
 
+# offer assurances about the stack safety of cosmo libc
+$(LIBC_STR_A_OBJS): private COPTS += -Wframe-larger-than=4096 -Walloca-larger-than=4096
+
+ifeq ($(ARCH), x86_64)
+o/$(MODE)/libc/str/crc32c.o: private				\
+		TARGET_ARCH =					\
+			-msse4.1 -mcrc32 -mpclmul
+endif
+
+ifeq ($(ARCH), aarch64)
+o/$(MODE)/libc/str/crc32c.o: private				\
+		TARGET_ARCH =					\
+			-march=armv8.1-a+crc+aes
+endif
+
 o/$(MODE)/libc/str/wmemset.o					\
 o/$(MODE)/libc/str/memset16.o					\
 o/$(MODE)/libc/str/dosdatetimetounix.o: private			\
@@ -77,13 +92,7 @@ o/$(MODE)/libc/str/iswseparator.o: private			\
 
 # ensure that division is optimized
 o/$(MODE)/libc/str/bcmp.o					\
-o/$(MODE)/libc/str/strcmp.o					\
-o/$(MODE)/libc/str/windowsdurationtotimeval.o			\
-o/$(MODE)/libc/str/windowsdurationtotimespec.o			\
-o/$(MODE)/libc/str/timevaltowindowstime.o			\
-o/$(MODE)/libc/str/timespectowindowstime.o			\
-o/$(MODE)/libc/str/windowstimetotimeval.o			\
-o/$(MODE)/libc/str/windowstimetotimespec.o: private		\
+o/$(MODE)/libc/str/strcmp.o: private				\
 		CFLAGS +=					\
 			-O2
 
@@ -93,6 +102,12 @@ o/$(MODE)/libc/str/iso8601.o					\
 o/$(MODE)/libc/str/iso8601us.o: private				\
 		CFLAGS +=					\
 			-O3
+
+ifeq ($(ARCH), x86_64)
+o/$(MODE)/libc/str/smoothsort.o: private			\
+		COPTS +=					\
+			-mstringop-strategy=libcall
+endif
 
 $(LIBC_STR_A_OBJS): private					\
 		CFLAGS +=					\

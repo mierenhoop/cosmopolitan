@@ -10,6 +10,7 @@ int __sys_utimensat(int, const char *, const struct timespec[2], int);
 int __utimens(int, const char *, const struct timespec[2], int);
 int sys_clock_getres(int, struct timespec *);
 int sys_clock_gettime(int, struct timespec *);
+int sys_clock_gettime_freebsd(int, struct timespec *);
 int sys_clock_gettime_m1(int, struct timespec *);
 int sys_clock_gettime_mono(struct timespec *);
 int sys_clock_gettime_nt(int, struct timespec *);
@@ -25,6 +26,7 @@ int sys_sem_timedwait(int64_t, const struct timespec *);
 int sys_utimensat(int, const char *, const struct timespec[2], int);
 int sys_utimensat_nt(int, const char *, const struct timespec[2], int);
 int sys_utimensat_old(int, const char *, const struct timespec[2], int);
+struct timespec sys_clock_gettime_monotonic_nt(void);
 
 const char *_DescribeTimespec(char[45], int, const struct timespec *);
 #define DescribeTimespec(rc, ts) _DescribeTimespec(alloca(45), rc, ts)

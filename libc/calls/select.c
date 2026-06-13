@@ -17,7 +17,9 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/sock/select.h"
+#include "libc/calls/struct/timespec.h"
 #include "libc/calls/struct/timeval.h"
+#include "libc/cosmotime.h"
 
 /**
  * Checks status on multiple file descriptors at once.
@@ -31,12 +33,13 @@
  *     such as out-of-band data on a socket; it is equivalent to POLLPRI
  *     in the revents of poll()
  * @param timeout may be null which means to block indefinitely; cosmo's
- *     implementation of select() never modifies this parameter which is
- *     how most platforms except Linux work which modifies it to reflect
- *     elapsed time, noting that POSIX permits either behavior therefore
- *     portable code should assume that timeout memory becomes undefined
- * @raise E2BIG if we exceeded the 64 socket limit on Windows
+ *     implementation of select() never modifies this parameter
+ * @raise ENOMEM if memory for internal data structures was unavailable
+ * @raise EBADF if an invalid file descriptor existed in an fd_set
  * @raise ECANCELED if thread was cancelled in masked mode
+ * @raise EINVAL if `nfds` exceeded `RLIMIT_NOFILE`
+ * @raise EINVAL if `nfds` exceeded `FD_SETSIZE`
+ * @raise EINVAL if `nfds` was negative
  * @raise EINTR if signal was delivered
  * @cancelationpoint
  * @asyncsignalsafe

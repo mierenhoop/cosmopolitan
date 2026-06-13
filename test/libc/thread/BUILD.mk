@@ -41,15 +41,17 @@ TEST_LIBC_THREAD_DIRECTDEPS =				\
 	LIBC_SOCK					\
 	LIBC_STDIO					\
 	LIBC_STR					\
+	LIBC_SYSTEM					\
 	LIBC_SYSV					\
 	LIBC_SYSV_CALLS					\
 	LIBC_TESTLIB					\
 	LIBC_THREAD					\
 	LIBC_X						\
 	THIRD_PARTY_LIBCXXABI				\
+	THIRD_PARTY_LIBUNWIND				\
 	THIRD_PARTY_NSYNC				\
 	THIRD_PARTY_NSYNC_MEM				\
-	THIRD_PARTY_TZ
+	THIRD_PARTY_TZ					\
 
 TEST_LIBC_THREAD_DEPS :=				\
 	$(call uniq,$(foreach x,$(TEST_LIBC_THREAD_DIRECTDEPS),$($(x))))
@@ -68,7 +70,7 @@ o/$(MODE)/test/libc/thread/%.dbg:			\
 	@$(APELINK)
 
 o/$(MODE)/test/libc/thread/pthread_kill_test.runs:	\
-		private .PLEDGE = stdio rpath wpath cpath fattr proc inet
+		private .PLEDGE = inet
 
 .PHONY: o/$(MODE)/test/libc/thread
 o/$(MODE)/test/libc/thread:				\

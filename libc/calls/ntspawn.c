@@ -17,8 +17,11 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/proc/ntspawn.h"
+#include "libc/assert.h"
+#include "libc/calls/state.internal.h"
 #include "libc/calls/struct/sigset.internal.h"
 #include "libc/calls/syscall_support-nt.internal.h"
+#include "libc/dce.h"
 #include "libc/intrin/strace.h"
 #include "libc/nt/createfile.h"
 #include "libc/nt/enum/accessmask.h"
@@ -38,55 +41,51 @@
 #include "libc/nt/struct/procthreadattributelist.h"
 #include "libc/nt/struct/startupinfo.h"
 #include "libc/nt/struct/startupinfoex.h"
+#include "libc/nt/thunk/msabi.h"
 #include "libc/proc/ntspawn.h"
-#include "libc/stdalign.h"
 #include "libc/str/str.h"
 #include "libc/sysv/errfuns.h"
-#ifdef __x86_64__
+#if SupportsWindows()
 
 struct SpawnBlock {
   char16_t path[PATH_MAX];
   char16_t cmdline[32767];
-  char16_t envblock[32767];
+  union {
+    char16_t envblock[32767];
+    char readbuf[4096];
+  };
   char envbuf[32767];
+  char16_t cwd[PATH_MAX];
 };
 
-static textwindows void *ntspawn_malloc(size_t size) {
+textwindows static void *ntspawn_malloc(size_t size) {
   return HeapAlloc(GetProcessHeap(), 0, size);
 }
 
-static textwindows void ntspawn_free(void *ptr) {
+textwindows static void ntspawn_free(void *ptr) {
   HeapFree(GetProcessHeap(), 0, ptr);
 }
 
-static textwindows ssize_t ntspawn_read(intptr_t fh, char *buf, size_t len) {
-  bool ok;
-  uint32_t got;
-  struct NtOverlapped overlap = {.hEvent = CreateEvent(0, 0, 0, 0)};
-  ok = (ReadFile(fh, buf, len, 0, &overlap) ||
-        GetLastError() == kNtErrorIoPending) &&
-       GetOverlappedResult(fh, &overlap, &got, true);
-  CloseHandle(overlap.hEvent);
-  return ok ? got : -1;
-}
-
-static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
+textwindows static int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
 
   // make executable path
-  if (__mkntpathath(a->dirhand, a->prog, 0, sb->path) == -1)
+  if (__mkntpathath(a->dirhand, a->prog, sb->path, false) == -1)
     return -1;
 
   // open executable
-  char *p = sb->envbuf;
-  char *pe = p + sizeof(sb->envbuf);
+  char *p = sb->readbuf;
+  char *pe = p + sizeof(sb->readbuf);
   intptr_t fh = CreateFile(
       sb->path, kNtFileGenericRead,
       kNtFileShareRead | kNtFileShareWrite | kNtFileShareDelete, 0,
       kNtOpenExisting, kNtFileAttributeNormal | kNtFileFlagBackupSemantics, 0);
   if (fh == -1)
-    return -1;
-  ssize_t got = ntspawn_read(fh, p, pe - p);
+    return __winerr();
+  uint32_t got;
+  bool32 ok = ReadFile(fh, p, pe - p, &got, 0);
   CloseHandle(fh);
+  if (!ok)
+    return enoexec();
   if (got < 3)
     return enoexec();
   pe = p + got;
@@ -133,7 +132,7 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
     sb->cmdline[i++] = ' ';
     sb->cmdline[i] = 0;
     // setup the true executable path
-    if (__mkntpathath(a->dirhand, argv[0], 0, sb->path) == -1)
+    if (__mkntpathath(a->dirhand, argv[0], sb->path, false) == -1)
       return -1;
   } else {
     // it's something else
@@ -148,12 +147,11 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
 
   // create attribute list
   // this code won't call malloc in practice
-  bool32 ok;
   void *freeme = 0;
   alignas(16) char memory[128];
   size_t size = sizeof(memory);
   struct NtProcThreadAttributeList *alist = (void *)memory;
-  uint32_t items = !!a->opt_hParentProcess + !!a->opt_lpExplicitHandleList;
+  uint32_t items = !!a->opt_hParentProcess + !!a->dwExplicitHandleCount;
   ok = InitializeProcThreadAttributeList(alist, items, 0, &size);
   if (!ok && GetLastError() == kNtErrorInsufficientBuffer) {
     ok = !!(alist = freeme = ntspawn_malloc(size));
@@ -166,10 +164,18 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
         alist, 0, kNtProcThreadAttributeParentProcess, &a->opt_hParentProcess,
         sizeof(a->opt_hParentProcess), 0, 0);
   }
-  if (ok && a->opt_lpExplicitHandleList) {
+  if (ok && a->dwExplicitHandleCount) {
     ok = UpdateProcThreadAttribute(
         alist, 0, kNtProcThreadAttributeHandleList, a->opt_lpExplicitHandleList,
         a->dwExplicitHandleCount * sizeof(*a->opt_lpExplicitHandleList), 0, 0);
+  }
+
+  // figure out current directory for new process
+  const char16_t *cwd = a->opt_lpCurrentDirectory;
+  if (!cwd) {
+    uint32_t len = GetCurrentDirectory(PATH_MAX, sb->cwd);
+    unassert(len && len < PATH_MAX);
+    cwd = sb->cwd;
   }
 
   // create the process
@@ -186,8 +192,8 @@ static textwindows int ntspawn2(struct NtSpawnArgs *a, struct SpawnBlock *sb) {
                             kNtExtendedStartupinfoPresent |
                             kNtInheritParentAffinity |
                             GetPriorityClass(GetCurrentProcess()),
-                        sb->envblock, a->opt_lpCurrentDirectory,
-                        &info.StartupInfo, a->opt_out_lpProcessInformation)) {
+                        sb->envblock, cwd, &info.StartupInfo,
+                        a->opt_out_lpProcessInformation)) {
         rc = 0;
       } else {
         rc = -1;
@@ -238,6 +244,7 @@ textwindows int ntspawn(struct NtSpawnArgs *args) {
   BLOCK_SIGNALS;
   if ((sb = ntspawn_malloc(sizeof(*sb)))) {
     rc = ntspawn2(args, sb);
+    ntspawn_free(sb);
   } else {
     rc = -1;
   }

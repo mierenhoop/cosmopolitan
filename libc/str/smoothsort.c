@@ -1,7 +1,7 @@
 /*-*- mode:c;indent-tabs-mode:nil;c-basic-offset:2;tab-width:8;coding:utf-8 -*-│
 │ vi: set et ft=c ts=2 sts=2 sw=2 fenc=utf-8                               :vi │
 ╚──────────────────────────────────────────────────────────────────────────────╝
-│ Copyright (C) 2011 by Valentin Ochs                                          │
+│ Copyright (C) 2011 by Lynn Ochs                                              │
 │                                                                              │
 │ Permission is hereby granted, free of charge, to any person obtaining a copy │
 │ of this software and associated documentation files (the "Software"), to     │
@@ -21,21 +21,27 @@
 │ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS │
 │ IN THE SOFTWARE.                                                             │
 └─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/intrin/bsf.h"
+#include "libc/intrin/kprintf.h"
 #include "libc/limits.h"
 #include "libc/mem/alg.h"
 #include "libc/str/str.h"
 
 __notice(smoothsort_notice, "\
 Smoothsort (MIT License)\n\
-Copyright 2011 Valentin Ochs\n\
+Copyright 2011 Lynn Ochs (https://0au.de/)\n\
 Discovered by Edsger Dijkstra");
+
+/* power-of-two length for working array so that we can mask indices and
+ * not depend on any invariant of the algorithm for spatial memory safety.
+ * the original size was just 14*sizeof(size_t)+1 */
+#define AR_LEN  (16 * sizeof(size_t))
+#define AR_MASK (AR_LEN - 1)
 
 typedef int (*cmpfun)(const void *, const void *, void *);
 
 struct SmoothSort {
   size_t lp[12 * sizeof(size_t)];
-  unsigned char *ar[14 * sizeof(size_t) + 1];
+  unsigned char *ar[AR_LEN];
   unsigned char tmp[256];
 };
 
@@ -43,12 +49,13 @@ static inline int ntz(unsigned long x) {
   return __builtin_ctzl(x);
 }
 
+/* returns index of first bit set, excluding the low bit assumed to always
+ * be set, starting from low bit of p[0] up through high bit of p[1] */
 static inline int pntz(size_t p[2]) {
-  int r = ntz(p[0] - 1);
-  if (r != 0 || (r = CHAR_BIT * sizeof(size_t) + ntz(p[1])) !=
-                    CHAR_BIT * sizeof(size_t)) {
-    return r;
-  }
+  if (p[0] != 1)
+    return ntz(p[0] - 1);
+  if (p[1])
+    return CHAR_BIT * sizeof(size_t) + ntz(p[1]);
   return 0;
 }
 
@@ -58,6 +65,8 @@ static inline void SmoothSort_shl(size_t p[2], int n) {
     n -= CHAR_BIT * sizeof(size_t);
     p[1] = p[0];
     p[0] = 0;
+    if (!n)
+      return;
   }
   p[1] <<= n;
   p[1] |= p[0] >> (sizeof(size_t) * CHAR_BIT - n);
@@ -69,27 +78,42 @@ static inline void SmoothSort_shr(size_t p[2], int n) {
     n -= CHAR_BIT * sizeof(size_t);
     p[0] = p[1];
     p[1] = 0;
+    if (!n)
+      return;
   }
   p[0] >>= n;
   p[0] |= p[1] << (sizeof(size_t) * CHAR_BIT - n);
   p[1] >>= n;
 }
 
-static void SmoothSort_cycle(struct SmoothSort *s, size_t width, int n) {
-  size_t l;
-  int i;
-  if (n < 2) {
-    return;
+#define CYCLE_CASE(w)                    \
+  case w: {                              \
+    char t[w];                           \
+    memcpy(t, s->ar[0], w);              \
+    for (int i = 0; i < n - 1; i++)      \
+      memcpy(s->ar[i], s->ar[i + 1], w); \
+    memcpy(s->ar[n - 1], t, w);          \
+    break;                               \
   }
-  s->ar[n] = s->tmp;
-  while (width) {
-    l = sizeof(s->tmp) < width ? sizeof(s->tmp) : width;
-    memcpy(s->ar[n], s->ar[0], l);
-    for (i = 0; i < n; i++) {
-      memcpy(s->ar[i], s->ar[i + 1], l);
-      s->ar[i] += l;
-    }
-    width -= l;
+
+static void SmoothSort_cycle(struct SmoothSort *s, size_t width, int n) {
+  if (n < 2)
+    return;
+  switch (width) {
+    CYCLE_CASE(4)
+    CYCLE_CASE(8)
+    default:
+      s->ar[n] = s->tmp;
+      while (width) {
+        size_t l = sizeof(s->tmp) < width ? sizeof(s->tmp) : width;
+        memcpy(s->ar[n], s->ar[0], l);
+        for (int i = 0; i < n; i++) {
+          memcpy(s->ar[i], s->ar[i + 1], l);
+          s->ar[i] += l;
+        }
+        width -= l;
+      }
+      break;
   }
 }
 
@@ -105,16 +129,16 @@ static void SmoothSort_sift(struct SmoothSort *s, unsigned char *head,
       break;
     }
     if (cmp(lf, rt, arg) >= 0) {
-      s->ar[i++] = lf;
+      s->ar[i++ & AR_MASK] = lf;
       head = lf;
       pshift -= 1;
     } else {
-      s->ar[i++] = rt;
+      s->ar[i++ & AR_MASK] = rt;
       head = rt;
       pshift -= 2;
     }
   }
-  SmoothSort_cycle(s, width, i);
+  SmoothSort_cycle(s, width, i & AR_MASK);
 }
 
 static void SmoothSort_trinkle(struct SmoothSort *s, unsigned char *head,
@@ -139,7 +163,7 @@ static void SmoothSort_trinkle(struct SmoothSort *s, unsigned char *head,
         break;
       }
     }
-    s->ar[i++] = stepson;
+    s->ar[i++ & AR_MASK] = stepson;
     head = stepson;
     trail = pntz(p);
     SmoothSort_shr(p, trail);
@@ -147,7 +171,7 @@ static void SmoothSort_trinkle(struct SmoothSort *s, unsigned char *head,
     trusty = 0;
   }
   if (!trusty) {
-    SmoothSort_cycle(s, width, i);
+    SmoothSort_cycle(s, width, i & AR_MASK);
     SmoothSort_sift(s, head, width, cmp, arg, pshift);
   }
 }
@@ -218,11 +242,10 @@ static void SmoothSort(struct SmoothSort *s, void *base, size_t nel,
  * @param width is the size of each item
  * @param cmp is a callback returning <0, 0, or >0
  * @param arg will optionally be passed as the third argument to cmp
- * @see smoothsort()
- * @see qsort()
+ * @asyncsignalsafe
  */
-void smoothsort_r(void *base, size_t count, size_t width, cmpfun cmp,
-                  void *arg) {
+void cosmo_smoothsort_r(void *base, size_t count, size_t width, cmpfun cmp,
+                        void *arg) {
   struct SmoothSort s;
   SmoothSort(&s, base, count, width, cmp, arg);
 }
@@ -233,12 +256,12 @@ void smoothsort_r(void *base, size_t count, size_t width, cmpfun cmp,
  * @param base points to an array to sort in-place
  * @param count is the item count
  * @param width is the size of each item
- * @param cmp is a callback returning <0, 0, or >0
- * @see smoothsort_r()
- * @see qsort()
+ * @param cmp is a callback returning <0, 0, or >0 which must impose a
+ *     strict weak ordering and behave as a pure function of its args
+ * @asyncsignalsafe
  */
-void smoothsort(void *base, size_t count, size_t width,
-                int cmp(const void *, const void *)) {
+void cosmo_smoothsort(void *base, size_t count, size_t width,
+                      int cmp(const void *, const void *)) {
   struct SmoothSort s;
   SmoothSort(&s, base, count, width, (cmpfun)cmp, 0);
 }

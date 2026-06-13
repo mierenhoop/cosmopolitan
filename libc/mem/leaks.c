@@ -16,67 +16,54 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
+#include "libc/cosmo.h"
 #include "libc/cxxabi.h"
 #include "libc/intrin/cxaatexit.h"
-#include "libc/intrin/dll.h"
 #include "libc/intrin/kprintf.h"
 #include "libc/intrin/weaken.h"
 #include "libc/mem/mem.h"
-#include "libc/nt/typedef/imagetlscallback.h"
 #include "libc/runtime/runtime.h"
 #include "libc/thread/posixthread.internal.h"
-#include "libc/thread/thread.h"
+#include "third_party/dlmalloc/dlmalloc.h"
 
-#define LEAK_CONTAINER(e) DLL_CONTAINER(struct Leak, elem, e)
-
-struct Leak {
-  void *alloc;
-  struct Dll elem;
+struct LeakInfo {
+  long count;
+  long bytes;
 };
 
-static int leak_count;
-static struct Dll *leaks;
-static struct Dll *freaks;
-static pthread_mutex_t lock;
-
-void __may_leak(void *alloc) {
-  if (!alloc)
-    return;
-  pthread_mutex_lock(&lock);
-  if (dll_is_empty(freaks)) {
-    int g = __gransize;
-    struct Leak *p = _mapanon(g);
-    int n = g / sizeof(struct Leak);
-    for (int i = 0; i < n; ++i) {
-      dll_init(&p[i].elem);
-      dll_make_first(&freaks, &p[i].elem);
-    }
-  }
-  struct Dll *e = dll_first(freaks);
-  LEAK_CONTAINER(e)->alloc = alloc;
-  dll_remove(&freaks, e);
-  dll_make_first(&leaks, e);
-  pthread_mutex_unlock(&lock);
-}
-
 static void visitor(void *start, void *end, size_t used_bytes, void *arg) {
+  struct LeakInfo *info = arg;
   if (!used_bytes)
     return;
-  for (struct Dll *e = dll_first(leaks); e; e = dll_next(leaks, e))
-    if (start == LEAK_CONTAINER(e)->alloc)
-      return;
   kprintf("error: leaked %'zu byte allocation at %p\n", used_bytes, start);
-  ++leak_count;
+  info->bytes += used_bytes;
+  info->count += 1;
 }
 
 /**
- * Tests for memory leaks.
+ * Performs simple memory leak detection.
+ *
+ * This is a zero overhead memory leak detector. To use it you just need
+ * to call CheckForMemoryLeaks() at the end of main(). The leak detector
+ * works by calling dlmalloc_inspect_all. The tradeoff is you won't have
+ * backtraces so it may be a bit tricky to trace the provenence of leaks
+ *
+ * For each malloc(), realloc(), etc. call where free() wasn't called it
+ * will print an error to kprintf(). The atexit() destructors are called
+ * beforehand, to ensure global allocations are freed. This function has
+ * to be called from an orphaned thread. If any leaks are detected, then
+ * the process will call exit() with the exit code 73.
+ *
+ * Alternatively, cosmo provides a second memory leak detector which may
+ * be accessed via APIs such as cosmo_leak_print(). The other API traces
+ * provenance and uses addr2line to print backtraces. To see the example
+ * usage, take a look at cosmopolitan/examples/memleak.c
  */
 void CheckForMemoryLeaks(void) {
 
   // validate usage of this api
   if (_weaken(_pthread_decimate))
-    _weaken(_pthread_decimate)(false);
+    _weaken(_pthread_decimate)(kPosixThreadZombie);
   if (!pthread_orphan_np())
     kprintf("warning: called CheckForMemoryLeaks() from non-orphaned thread\n");
 
@@ -85,10 +72,11 @@ void CheckForMemoryLeaks(void) {
   __cxa_finalize(0);
 
   // check for leaks
-  malloc_inspect_all(visitor, 0);
-  if (leak_count) {
-    kprintf("loser: you forgot to call free %'d time%s\n", leak_count,
-            leak_count == 1 ? "" : "s");
-    _exit(73);
+  struct LeakInfo info = {0};
+  dlmalloc_inspect_all(visitor, &info);
+  if (info.count) {
+    kprintf("       you forgot to call free %'ld time%s (%'ld bytes)\n",
+            info.count, info.count == 1 ? "" : "s", info.bytes);
+    _Exit(73);
   }
 }

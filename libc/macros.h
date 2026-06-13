@@ -158,6 +158,60 @@
 	.weak	\canonical
 .endm
 
+.macro	beg
+	.cfi_startproc
+.endm
+
+.macro	pro
+#if defined(__x86_64__)
+	push	%rbp
+	.cfi_adjust_cfa_offset 8
+	.cfi_rel_offset %rbp,0
+	mov	%rsp,%rbp
+	.cfi_def_cfa_register %rbp
+#elif defined(__aarch64__)
+	stp	x29,x30,[sp,-16]!
+	mov	x29,sp
+	.cfi_adjust_cfa_offset 16
+	.cfi_rel_offset x29,0
+	.cfi_rel_offset x30,8
+#else
+#error "unsupported architecture"
+#endif
+.endm
+
+.macro	epi
+#if defined(__x86_64__)
+	.cfi_def_cfa_register %rsp
+	leave
+	.cfi_adjust_cfa_offset -8
+	.cfi_restore %rbp
+#elif defined(__aarch64__)
+	ldp	x29,x30,[sp],#16
+	.cfi_adjust_cfa_offset -16
+	.cfi_restore x30
+	.cfi_restore x29
+#else
+#error "unsupported architecture"
+#endif
+.endm
+
+.macro	end
+	.cfi_endproc
+.endm
+
+.macro	cpush	reg:req
+	push	\reg
+	.cfi_adjust_cfa_offset 8
+	.cfi_rel_offset \reg,0
+.endm
+
+.macro	cpop	reg:req
+	pop	\reg
+	.cfi_adjust_cfa_offset -8
+	.cfi_restore \reg
+.endm
+
 #ifdef __aarch64__
 .macro	jmp	dest:req
 	b	\dest
@@ -209,7 +263,7 @@
 	ud2		// crash if contract is broken
 #elif !defined(NDEBUG) && defined(__aarch64__)
 	brk	#1000
-#elif defined(__FNO_OMIT_FRAME_POINTER__) && defined(__x86_64__)
+#elif defined(__x86_64__)
 	nop		// avoid noreturn tail call backtrace ambiguity
 #endif
 .endm
@@ -231,7 +285,7 @@
 	nop
 	.endr
 #elif defined(__aarch64__)
-	.rept	6
+	.rept	8
 	nop
 	.endr
 #endif /* __x86_64__ */
@@ -289,21 +343,6 @@
 .macro	.tbss
 	.section .tdata,"awT",@nobits
 	.balign	4
-.endm
-
-//	Loads address of errno into %rcx
-.macro	.errno
-	call	__errno_location
-.endm
-
-//	Post-Initialization Read-Only (PIRO) BSS section.
-//	@param	ss is an optional string, for control image locality
-.macro	.piro	ss
- .ifnb	\ss
-	.section .piro.sort.bss.\ss,"aw",@nobits
- .else
-	.section .piro.bss,"aw",@nobits
- .endif
 .endm
 
 //	Helpers for Cosmopolitan _init() amalgamation magic.

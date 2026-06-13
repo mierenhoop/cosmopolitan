@@ -203,7 +203,14 @@ static __inline void wideMultiply(rep_t a, rep_t b, rep_t *hi, rep_t *lo) {
 #define typeWidth       (sizeof(rep_t)*CHAR_BIT)
 #define exponentBits    (typeWidth - significandBits - 1)
 #define maxExponent     ((1u << exponentBits) - 1)
-#define exponentBias    (maxExponent >> 1)
+// [jart] exponentBias is signed on purpose. It is subtracted from the
+//        integer exponent in __compiler_rt_logbX (exp - exponentBias);
+//        if it were unsigned, that subtraction would be evaluated in
+//        unsigned arithmetic and a result that should be negative (any
+//        x in (0,1)) would wrap to a huge positive value. That made
+//        __divdc3/__divsc3 underflow the denominator to zero and return
+//        (inf, nan) for every divisor with max(|c|,|d|) < 1.
+#define exponentBias    ((int)(maxExponent >> 1))
 
 #define implicitBit     (REP_C(1) << significandBits)
 #define significandMask (implicitBit - 1U)

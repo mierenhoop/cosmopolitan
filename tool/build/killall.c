@@ -51,9 +51,7 @@ static const char *prog;
 static char16_t **filters;
 static uint32_t pids[10000];
 
-#include "libc/mem/tinymalloc.inc"
-
-static wontreturn void PrintUsage(int rc, FILE *f) {
+[[noreturn]] static void PrintUsage(int rc, FILE *f) {
   fprintf(f,
           "Usage: %s [-nshv] NAME...\n"
           "\tNAME\tcase-insensitive process name substring filter\n"
@@ -65,7 +63,7 @@ static wontreturn void PrintUsage(int rc, FILE *f) {
   exit(rc);
 }
 
-static wontreturn void OutOfMemory(void) {
+[[noreturn]] static void OutOfMemory(void) {
   fprintf(stderr, "%s: out of memory\n", prog);
   exit(1);
 }

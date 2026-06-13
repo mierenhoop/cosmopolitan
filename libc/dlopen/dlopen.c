@@ -26,6 +26,7 @@
 #include "libc/calls/syscall-sysv.internal.h"
 #include "libc/calls/syscall_support-nt.internal.h"
 #include "libc/cosmo.h"
+#include "libc/cosmotime.h"
 #include "libc/dce.h"
 #include "libc/dlopen/dlfcn.h"
 #include "libc/elf/def.h"
@@ -57,6 +58,7 @@
 #include "libc/sysv/consts/prot.h"
 #include "libc/sysv/errfuns.h"
 #include "libc/temp.h"
+#include "libc/thread/posixthread.internal.h"
 #include "libc/thread/thread.h"
 #include "libc/thread/tls.h"
 
@@ -131,6 +133,8 @@ struct {
 
 long __sysv2nt14();
 long foreign_tramp();
+void __dlopen_lock(void);
+void __dlopen_unlock(void);
 
 static _Thread_local char dlerror_buf[128];
 
@@ -251,7 +255,7 @@ static bool elf_slurp(struct Loaded *l, int fd, const char *file) {
   return true;
 }
 
-static dontinline bool elf_load(struct Loaded *l, const char *file, long pagesz,
+dontinline static bool elf_load(struct Loaded *l, const char *file, long pagesz,
                                 char *interp_path, size_t interp_size) {
   int fd;
   if ((fd = open(file, O_RDONLY | O_CLOEXEC)) == -1)
@@ -277,7 +281,7 @@ static long *push_strs(long *sp, char **list, int count) {
   return sp;
 }
 
-static wontreturn dontinstrument void foreign_helper(void **p) {
+wontreturn dontinstrument static void foreign_helper(void **p) {
   __foreign.dlopen = p[0];
   __foreign.dlsym = p[1];
   __foreign.dlclose = p[2];
@@ -285,7 +289,7 @@ static wontreturn dontinstrument void foreign_helper(void **p) {
   _longjmp(__foreign.jb, 1);
 }
 
-static dontinline void elf_exec(const char *file, char **envp) {
+dontinline static void elf_exec(const char *file, char **envp) {
 
   // get microprocessor page size
   long pagesz = __pagesize;
@@ -409,7 +413,7 @@ static char *dlerror_set(const char *str) {
   return dlerror_buf;
 }
 
-static dontinline char *foreign_alloc_block(void) {
+dontinline static char *foreign_alloc_block(void) {
   char *p = 0;
   size_t sz = 65536;
   if (!IsWindows()) {
@@ -432,17 +436,16 @@ static dontinline char *foreign_alloc_block(void) {
   return p;
 }
 
-static dontinline void *foreign_alloc(size_t n) {
+dontinline static void *foreign_alloc(size_t n) {
   void *res;
   static char *block;
-  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-  pthread_mutex_lock(&lock);
+  __dlopen_lock();
   if (!block || READ32LE(block) + n > 65536)
     if (!(block = foreign_alloc_block()))
       return 0;
   res = block + READ32LE(block);
   WRITE32LE(block, READ32LE(block) + n);
-  pthread_mutex_unlock(&lock);
+  __dlopen_unlock();
   return res;
 }
 
@@ -546,7 +549,7 @@ static void *foreign_thunk_nt(void *func) {
   return code;
 }
 
-static dontinline bool foreign_compile(char exe[hasatleast PATH_MAX]) {
+dontinline static bool foreign_compile(char exe[hasatleast PATH_MAX]) {
 
   // construct path
   strlcpy(exe, get_tmp_dir(), PATH_MAX);
@@ -631,11 +634,11 @@ static dontinline bool foreign_compile(char exe[hasatleast PATH_MAX]) {
     errno = err;
     return false;
   }
-  while (waitpid(pid, &ws, 0) == -1) {
-    if (errno != EINTR) {
-      unlink(tmp);
-      return false;
-    }
+  if (waitpid(pid, &ws, 0) == -1) {
+    // signals and cancelation are blocked
+    // therefore this must be a real error
+    unlink(tmp);
+    return false;
   }
   if (ws) {
     unlink(tmp);
@@ -808,7 +811,7 @@ void *cosmo_dlopen(const char *path, int mode) {
   }
   ALLOW_CANCELATION;
   ALLOW_SIGNALS;
-  STRACE("dlopen(%#s, %d) → %p% m", path, mode, res);
+  STRACE("cosmo_dlopen(%#s, %d) → %p% m", path, mode, res);
   return res;
 }
 
@@ -853,7 +856,7 @@ void *cosmo_dlsym(void *handle, const char *name) {
   } else {
     func = 0;
   }
-  STRACE("dlsym(%p, %#s) → %p", handle, name, func);
+  STRACE("cosmo_dlsym(%p, %#s) → %p", handle, name, func);
   return func;
 }
 
@@ -888,7 +891,7 @@ int cosmo_dlclose(void *handle) {
   } else {
     res = -1;
   }
-  STRACE("dlclose(%p) → %d", handle, res);
+  STRACE("cosmo_dlclose(%p) → %d", handle, res);
   return res;
 }
 
@@ -907,6 +910,6 @@ char *cosmo_dlerror(void) {
   } else {
     res = dlerror_buf;
   }
-  STRACE("dlerror() → %#s", res);
+  STRACE("cosmo_dlerror() → %#s", res);
   return res;
 }

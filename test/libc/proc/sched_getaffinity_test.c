@@ -18,6 +18,7 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/calls.h"
 #include "libc/calls/struct/cpuset.h"
+#include "libc/cosmo.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/fmt/conv.h"
@@ -29,6 +30,8 @@
 #include "libc/testlib/testlib.h"
 #include "libc/thread/thread.h"
 #include "libc/thread/thread2.h"
+
+int disable_limit_process_to_single_cpu;
 
 void SetUp(void) {
   if (!IsLinux() && !IsFreebsd() && !IsWindows()) {
@@ -51,7 +54,7 @@ TEST(sched_getaffinity, firstOnly) {
 }
 
 TEST(sched_getaffinity, secondOnly) {
-  if (__get_cpu_count() < 2)
+  if (cosmo_cpu_count() < 2)
     return;
   cpu_set_t x, y;
   CPU_ZERO(&x);
@@ -90,7 +93,6 @@ __attribute__((__constructor__)) static void init(void) {
   }
 }
 
-#ifdef __x86_64__
 TEST(sched_setaffinity, isInheritedAcrossExecve) {
   cpu_set_t x;
   CPU_ZERO(&x);
@@ -105,7 +107,6 @@ TEST(sched_setaffinity, isInheritedAcrossExecve) {
   EXPECT_TRUE(WIFEXITED(ws));
   EXPECT_EQ(42, WEXITSTATUS(ws));
 }
-#endif /* __x86_64__ */
 
 TEST(sched_getaffinity, getpid) {
   cpu_set_t x, y;

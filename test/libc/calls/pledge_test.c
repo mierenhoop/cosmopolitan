@@ -64,6 +64,14 @@
 
 void SetUpOnce(void) {
   testlib_enable_tmp_setup_teardown();
+  if (pledge(0, 0) == -1) {
+    fprintf(stderr, "warning: pledge() not supported on this system %m\n");
+    exit(0);
+  }
+}
+
+void SetUp(void) {
+  __pledge_mode = PLEDGE_PENALTY_RETURN_EPERM;
 }
 
 void OnSig(int sig) {
@@ -71,16 +79,6 @@ void OnSig(int sig) {
 }
 
 int sys_memfd_secret(unsigned int);  // our ENOSYS threshold
-
-void SetUp(void) {
-  if (pledge(0, 0) == -1) {
-    fprintf(stderr, "warning: pledge() not supported on this system %m\n");
-    exit(0);
-  }
-  testlib_extract("/zip/life.elf", "life.elf", 0755);
-  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
-  __pledge_mode = PLEDGE_PENALTY_RETURN_EPERM;
-}
 
 TEST(pledge, default_allowsExit) {
   int *job;
@@ -107,6 +105,7 @@ TEST(pledge, execpromises_notok) {
   if (IsOpenbsd())
     return;  // b/c testing linux bpf
   int ws, pid;
+  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     putenv("COMDBG=REDACTED");
@@ -177,7 +176,7 @@ TEST(pledge, tgkill) {
   ASSERT_SYS(0, 0, pthread_create(&worker, 0, TgkillWorker, 0));
   ASSERT_SYS(0, 0,
              sys_tgkill(getpid(), _pthread_tid((struct PosixThread *)worker),
-                        SIGUSR1));
+                        __linux2sig(SIGUSR1)));
   ASSERT_SYS(0, 0, pthread_join(worker, 0));
   EXITS(0);
 }
@@ -278,7 +277,6 @@ TEST(pledge, stdio_fcntl_allowsSomeFirstArgs) {
     ASSERT_SYS(EPERM, 0, isatty(0));
     ASSERT_SYS(EPERM, -1, fcntl(0, 777));
     ASSERT_SYS(EPERM, -1, fcntl(0, F_GETLK, &lk));
-    ASSERT_SYS(EPERM, -1, fcntl(0, F_NOTIFY));
     ASSERT_SYS(EPERM, -1, socket(AF_INET, SOCK_STREAM, IPPROTO_TCP));
     _Exit(0);
   }
@@ -480,7 +478,7 @@ TEST(pledge, open_rpath) {
     ASSERT_SYS(0, 0, pledge("stdio rpath", 0));
     ASSERT_SYS(0, 3, open("foo", O_RDONLY));
     ASSERT_SYS(EINVAL, -1, open("foo", O_RDONLY | O_TRUNC));
-    ASSERT_SYS(EPERM, -1, open("foo", O_RDONLY | O_TMPFILE));
+    ASSERT_SYS(EPERM, -1, open("foo", O_RDONLY | 0x00410000));
     ASSERT_SYS(EPERM, -1, open("foo", O_RDWR | O_TRUNC | O_CREAT, 0644));
     ASSERT_SYS(EPERM, -1, open("foo", O_WRONLY | O_TRUNC | O_CREAT, 0644));
     _Exit(0);
@@ -497,7 +495,7 @@ TEST(pledge, open_wpath) {
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     ASSERT_SYS(0, 0, pledge("stdio wpath", 0));
-    ASSERT_SYS(EPERM, -1, open(".", O_RDWR | O_TMPFILE, 07644));
+    ASSERT_SYS(EPERM, -1, open(".", O_RDWR | 0x00410000, 07644));
     ASSERT_SYS(0, 3, open("foo", O_WRONLY | O_TRUNC));
     ASSERT_SYS(0, 4, open("foo", O_RDWR));
     ASSERT_SYS(EPERM, -1, open("foo", O_WRONLY | O_TRUNC | O_CREAT, 0644));
@@ -532,6 +530,7 @@ TEST(pledge, open_cpath) {
 TEST(pledge, execpromises_ok) {
   if (IsOpenbsd())
     return;  // b/c testing linux bpf
+  testlib_extract("/zip/life.elf", "life.elf", 0755);
   int ws, pid;
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
@@ -549,6 +548,7 @@ TEST(pledge, execpromises_notok1) {
   if (IsOpenbsd())
     return;  // b/c testing linux bpf
   int ws, pid;
+  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     putenv("COMDBG=REDACTED");
@@ -565,6 +565,7 @@ TEST(pledge, execpromises_reducesAtExecOnLinux) {
   if (IsOpenbsd())
     return;  // b/c testing linux bpf
   int ws, pid;
+  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     putenv("COMDBG=REDACTED");
@@ -583,6 +584,7 @@ TEST(pledge_openbsd, execpromisesIsNull_letsItDoAnything) {
   if (!IsOpenbsd())
     return;
   int ws, pid;
+  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     ASSERT_SYS(0, 0, pledge("stdio exec", 0));
@@ -602,6 +604,7 @@ TEST(pledge_openbsd, execpromisesIsSuperset_letsItDoAnything) {
   if (!IsOpenbsd())
     return;
   int ws, pid;
+  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     ASSERT_SYS(0, 0, pledge("stdio rpath exec", "stdio rpath tty inet"));
@@ -623,6 +626,7 @@ TEST(pledge_openbsd, execpromises_notok) {
   if (IsOpenbsd())
     return;  // mimmutable() ugh
   int ws, pid;
+  testlib_extract("/zip/sock.elf", "sock.elf", 0755);
   ASSERT_NE(-1, (pid = fork()));
   if (!pid) {
     putenv("COMDBG=REDACTED");

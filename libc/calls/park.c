@@ -18,35 +18,78 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/internal.h"
 #include "libc/calls/sig.internal.h"
+#include "libc/calls/struct/sigset.h"
+#include "libc/calls/struct/timespec.h"
+#include "libc/calls/syscall_support-nt.internal.h"
+#include "libc/cosmotime.h"
+#include "libc/dce.h"
+#include "libc/fmt/wintime.internal.h"
 #include "libc/intrin/atomic.h"
 #include "libc/intrin/weaken.h"
+#include "libc/nt/events.h"
+#include "libc/nt/runtime.h"
 #include "libc/nt/synchronization.h"
+#include "libc/nt/thunk/msabi.h"
+#include "libc/str/str.h"
 #include "libc/sysv/consts/sicode.h"
 #include "libc/sysv/errfuns.h"
 #include "libc/thread/posixthread.internal.h"
-#ifdef __x86_64__
+#if SupportsWindows()
 
-// returns 0 on timeout or spurious wakeup
+__msabi extern typeof(WaitForMultipleObjects)
+    *const __imp_WaitForMultipleObjects;
+
+// returns 0 if deadline is reached
 // raises EINTR if a signal delivery interrupted wait operation
 // raises ECANCELED if this POSIX thread was canceled in masked mode
-static textwindows int _park_thread(uint32_t msdelay, sigset_t waitmask,
+textwindows static int _park_thread(struct timespec deadline, sigset_t waitmask,
                                     bool restartable) {
-  int sig, handler_was_called;
-  if (_check_cancel() == -1)
-    return -1;
-  if (_weaken(__sig_get) && (sig = _weaken(__sig_get)(waitmask)))
-    goto HandleSignal;
-  int expect = 0;
-  atomic_int futex = 0;
-  struct PosixThread *pt = _pthread_self();
-  pt->pt_blkmask = waitmask;
-  atomic_store_explicit(&pt->pt_blocker, &futex, memory_order_release);
-  bool32 ok = WaitOnAddress(&futex, &expect, sizeof(int), msdelay);
-  atomic_store_explicit(&pt->pt_blocker, 0, memory_order_release);
-  if (ok && _weaken(__sig_get) && (sig = _weaken(__sig_get)(waitmask))) {
-  HandleSignal:
-    handler_was_called = _weaken(__sig_relay)(sig, SI_KERNEL, waitmask);
-    if (_check_cancel() == -1)
+  for (;;) {
+    uint32_t handl = 0;
+    intptr_t hands[2];
+
+    // create event object
+    if (!(hands[handl++] = __interruptible_start(waitmask)))
+      return __winerr();
+
+    // create high precision timer if needed
+    if (memcmp(&deadline, &timespec_max, sizeof(struct timespec))) {
+      intptr_t hTimer;
+      if ((hTimer = CreateWaitableTimer(NULL, true, NULL))) {
+        int64_t due = TimeSpecToWindowsTime(deadline);
+        if (SetWaitableTimer(hTimer, &due, 0, NULL, NULL, false)) {
+          hands[handl++] = hTimer;
+        } else {
+          CloseHandle(hTimer);
+        }
+      }
+    }
+
+    // perform wait operation
+    int sig = 0;
+    uint32_t wi = 0;
+    if (!_is_canceled() &&
+        !(_weaken(__sig_get) && (sig = _weaken(__sig_get)(waitmask))))
+      wi = __imp_WaitForMultipleObjects(handl, hands, false, -1u);
+    __interruptible_end();
+    for (int i = 1; i < handl; ++i)
+      CloseHandle(hands[i]);
+
+    // recursion is now safe
+    if (wi == 1)
+      return 0;
+    if (wi == -1u)
+      return __winerr();
+    int handler_was_called = 0;
+    if (!sig) {
+      if (_check_cancel())
+        return -1;
+      if (_weaken(__sig_get))
+        sig = _weaken(__sig_get)(waitmask);
+    }
+    if (sig)
+      handler_was_called = _weaken(__sig_relay)(sig, SI_KERNEL, waitmask);
+    if (_check_cancel())
       return -1;
     if (handler_was_called & SIG_HANDLED_NO_RESTART)
       return eintr();
@@ -54,15 +97,14 @@ static textwindows int _park_thread(uint32_t msdelay, sigset_t waitmask,
       if (!restartable)
         return eintr();
   }
-  return 0;
 }
 
-textwindows int _park_norestart(uint32_t msdelay, sigset_t waitmask) {
-  return _park_thread(msdelay, waitmask, false);
+textwindows int _park_norestart(struct timespec deadline, sigset_t waitmask) {
+  return _park_thread(deadline, waitmask, false);
 }
 
-textwindows int _park_restartable(uint32_t msdelay, sigset_t waitmask) {
-  return _park_thread(msdelay, waitmask, true);
+textwindows int _park_restartable(struct timespec deadline, sigset_t waitmask) {
+  return _park_thread(deadline, waitmask, true);
 }
 
 #endif /* __x86_64__ */

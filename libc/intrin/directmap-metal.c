@@ -19,12 +19,12 @@
 #include "libc/calls/calls.h"
 #include "libc/calls/internal.h"
 #include "libc/calls/metalfile.internal.h"
-#include "libc/intrin/directmap.h"
 #include "libc/macros.h"
 #include "libc/runtime/pc.internal.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/prot.h"
 #include "libc/sysv/errfuns.h"
+#include "libc/sysv/pib.h"
 #ifdef __x86_64__
 
 #define MAP_ANONYMOUS_linux 0x00000020
@@ -32,19 +32,11 @@
 
 static uint64_t sys_mmap_metal_break;
 
-static struct DirectMap bad_mmap(void) {
-  struct DirectMap res;
-  res.addr = (void *)-1;
-  res.maphandle = -1;
-  return res;
-}
-
-struct DirectMap sys_mmap_metal(void *vaddr, size_t size, int prot, int flags,
-                                int fd, int64_t off) {
+void *sys_mmap_metal(void *vaddr, size_t size, int prot, int flags, int fd,
+                     int64_t off) {
   /* asan runtime depends on this function */
   size_t i;
   struct mman *mm;
-  struct DirectMap res;
   uint64_t addr, faddr = 0, page, e, *pte, *fdpte, *pml4t;
   mm = __get_mm();
   pml4t = __get_pml4t();
@@ -53,19 +45,19 @@ struct DirectMap sys_mmap_metal(void *vaddr, size_t size, int prot, int flags,
   if (!(flags & MAP_ANONYMOUS_linux)) {
     struct Fd *sfd;
     struct MetalFile *file;
-    if (off < 0 || fd < 0 || fd >= g_fds.n)
-      return bad_mmap();
-    sfd = &g_fds.p[fd];
+    if (off < 0 || fd >= __get_pib()->fds.n)
+      return MAP_FAILED;
+    sfd = &__get_pib()->fds.p[fd];
     if (sfd->kind != kFdFile)
-      return bad_mmap();
+      return MAP_FAILED;
     file = (struct MetalFile *)sfd->handle;
     /* TODO: allow mapping partial page at end of file, if file size not
      * multiple of page size */
     if (off > file->size || size > file->size - off)
-      return bad_mmap();
+      return MAP_FAILED;
     faddr = (uint64_t)file->base + off;
     if (faddr % 4096 != 0)
-      return bad_mmap();
+      return MAP_FAILED;
   }
   if (!(flags & MAP_FIXED_linux)) {
     if (!addr) {
@@ -88,7 +80,7 @@ struct DirectMap sys_mmap_metal(void *vaddr, size_t size, int prot, int flags,
       if ((flags & MAP_ANONYMOUS_linux)) {
         page = __new_page(mm);
         if (!page)
-          return bad_mmap();
+          return MAP_FAILED;
         __clear_page(BANE + page);
         e = page | PAGE_RSRV | PAGE_U;
         if ((prot & PROT_WRITE))
@@ -114,9 +106,7 @@ struct DirectMap sys_mmap_metal(void *vaddr, size_t size, int prot, int flags,
       break;
     }
   }
-  res.addr = (void *)addr;
-  res.maphandle = -1;
-  return res;
+  return (void *)addr;
 }
 
 #endif /* __x86_64__ */

@@ -38,9 +38,11 @@
 #include "libc/nt/winsock.h"
 #include "libc/sock/internal.h"
 #include "libc/sock/sendfile.internal.h"
+#include "libc/sock/syscall_fd.internal.h"
 #include "libc/sock/wsaid.internal.h"
 #include "libc/stdio/sysparam.h"
 #include "libc/sysv/errfuns.h"
+#include "libc/sysv/pib.h"
 
 static struct {
   atomic_uint once;
@@ -58,25 +60,25 @@ static void transmitfile_init(void) {
   g_transmitfile.lpTransmitFile = __get_wsaid(&TransmitfileGuid);
 }
 
-static dontinline textwindows ssize_t sys_sendfile_nt(
+textwindows dontinline static ssize_t sys_sendfile_nt(
     int outfd, int infd, int64_t *opt_in_out_inoffset, uint32_t uptobytes) {
   ssize_t rc;
   uint32_t flags = 0;
   bool locked = false;
   int64_t ih, oh, eof, offset;
   struct NtByHandleFileInformation wst;
-  if (!__isfdkind(infd, kFdFile) || !g_fds.p[infd].cursor)
+  if (!__isfdkind(infd, kFdFile) || !__get_pib()->fds.p[infd].cursor)
     return ebadf();
   if (!__isfdkind(outfd, kFdSocket))
     return ebadf();
-  ih = g_fds.p[infd].handle;
-  oh = g_fds.p[outfd].handle;
+  ih = __get_pib()->fds.p[infd].handle;
+  oh = __get_pib()->fds.p[outfd].handle;
   if (opt_in_out_inoffset) {
     offset = *opt_in_out_inoffset;
   } else {
     locked = true;
-    __cursor_lock(g_fds.p[infd].cursor);
-    offset = g_fds.p[infd].cursor->shared->pointer;
+    __cursor_lock(__get_pib()->fds.p[infd].cursor);
+    offset = __get_pib()->fds.p[infd].cursor->shared->pointer;
   }
   if (GetFileInformationByHandle(ih, &wst)) {
     // TransmitFile() returns EINVAL if `uptobytes` goes past EOF.
@@ -86,20 +88,21 @@ static dontinline textwindows ssize_t sys_sendfile_nt(
     }
   } else {
     if (locked)
-      __cursor_unlock(g_fds.p[infd].cursor);
+      __cursor_unlock(__get_pib()->fds.p[infd].cursor);
     return ebadf();
   }
   struct NtOverlapped ov = {.hEvent = WSACreateEvent(), .Pointer = offset};
   cosmo_once(&g_transmitfile.once, transmitfile_init);
-  if (g_transmitfile.lpTransmitFile(oh, ih, uptobytes, 0, &ov, 0, 0) ||
-      WSAGetLastError() == kNtErrorIoPending ||
-      WSAGetLastError() == WSAEINPROGRESS) {
+  if (ov.hEvent &&
+      (g_transmitfile.lpTransmitFile(oh, ih, uptobytes, 0, &ov, 0, 0) ||
+       WSAGetLastError() == kNtErrorIoPending ||
+       WSAGetLastError() == WSAEINPROGRESS)) {
     if (WSAGetOverlappedResult(oh, &ov, &uptobytes, true, &flags)) {
       rc = uptobytes;
       if (opt_in_out_inoffset) {
         *opt_in_out_inoffset = offset + rc;
       } else {
-        g_fds.p[infd].cursor->shared->pointer = offset + rc;
+        __get_pib()->fds.p[infd].cursor->shared->pointer = offset + rc;
       }
     } else {
       rc = __winsockerr();
@@ -108,7 +111,7 @@ static dontinline textwindows ssize_t sys_sendfile_nt(
     rc = __winsockerr();
   }
   if (locked)
-    __cursor_unlock(g_fds.p[infd].cursor);
+    __cursor_unlock(__get_pib()->fds.p[infd].cursor);
   WSACloseEvent(ov.hEvent);
   return rc;
 }

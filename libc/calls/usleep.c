@@ -17,6 +17,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/struct/timespec.h"
+#include "libc/cosmotime.h"
 #include "libc/errno.h"
 #include "libc/sysv/consts/clock.h"
 #include "libc/sysv/consts/utime.h"
@@ -34,10 +35,14 @@
  * @norestart
  */
 int usleep(uint64_t micros) {
-  errno_t err;
-  struct timespec ts = timespec_frommicros(micros);
-  err = clock_nanosleep(CLOCK_REALTIME, 0, &ts, 0);
-  if (err)
-    return errno = err, -1;
+  // All OSes except OpenBSD return instantly on usleep(0). So we might
+  // as well avoid system call overhead and helping OpenBSD work better
+  if (micros) {
+    errno_t err;
+    struct timespec ts = timespec_frommicros(micros);
+    err = clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, 0);
+    if (err)
+      return errno = err, -1;
+  }
   return 0;
 }

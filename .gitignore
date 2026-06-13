@@ -1,6 +1,7 @@
 # -*- conf -*-
 
 /o
+/core
 /cosmocc
 /.cosmocc
 
@@ -15,3 +16,4 @@ __pycache__
 /tool/emacs/*.elc
 /perf.data
 /perf.data.old
+/qemu*core

@@ -16,17 +16,17 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/calls/calls.h"
 #include "libc/calls/struct/stat.h"
+#include "libc/mem/mem.h"
 #include "libc/stdio/internal.h"
-#include "libc/stdio/stdio.h"
-#include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/s.h"
-#include "libc/sysv/errfuns.h"
-#include "libc/thread/thread.h"
+
+__static_yoink("fflush");
 
 /**
  * Allocates stream object for already-opened file descriptor.
+ *
+ * The file descriptor will be closed by fclose().
  *
  * @param fd existing file descriptor or -1 for plain old buffer
  * @param mode is passed to fopenflags()
@@ -35,19 +35,23 @@
  */
 FILE *fdopen(int fd, const char *mode) {
   FILE *f;
+  int oflags;
   struct stat st;
+  if ((oflags = fopenflags(mode)) == -1)
+    return NULL;
   if (fstat(fd, &st))
     return 0;
-  if ((f = __stdio_alloc())) {
-    f->fd = fd;
-    f->bufmode = S_ISREG(st.st_mode) ? _IOFBF : _IONBF;
-    f->iomode = fopenflags(mode);
-    f->buf = f->mem;
-    f->size = BUFSIZ;
-    if ((f->iomode & O_ACCMODE) != O_RDONLY) {
-      __fflush_register(f);
-    }
-    return f;
+  if (!(f = __stdio_alloc()))
+    return 0;
+  f->bufmode = S_ISCHR(st.st_mode) ? _IONBF : _IOFBF;
+  f->oflags = oflags;
+  f->size = BUFSIZ;
+  if (!(f->buf = malloc(f->size + 1))) {
+    __stdio_unref(f);
+    return 0;
   }
-  return NULL;
+  f->buf[f->size] = 0;
+  f->freebuf = 1;
+  f->fd = fd;
+  return f;
 }

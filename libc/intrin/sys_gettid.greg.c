@@ -22,10 +22,14 @@
 #include "libc/nt/thread.h"
 #include "libc/nt/thunk/msabi.h"
 #include "libc/runtime/internal.h"
+#include "libc/sysv/pib.h"
 
 __msabi extern typeof(GetCurrentThreadId) *const __imp_GetCurrentThreadId;
 
-int sys_gettid(void) {
+// it's important that this be noinstrument because the child process
+// created by fork() needs to update this value quickly, since ftrace
+// will deadlock __maps_lock() if the wrong tid is accidentally used.
+dontinstrument int sys_gettid(void) {
   int64_t wut;
 #ifdef __x86_64__
   int tid;
@@ -60,7 +64,7 @@ int sys_gettid(void) {
         : "rcx", "r8", "r9", "r10", "r11", "memory", "cc");
     tid = wut;
   } else {
-    tid = __pid;
+    tid = __get_pib()->pid;
   }
   return tid;
 #elif defined(__aarch64__)
@@ -81,7 +85,7 @@ int sys_gettid(void) {
                  : "x8", "memory");
     res = wut;
   } else {
-    res = __pid;
+    res = __get_pib()->pid;
   }
   return res;
 #else

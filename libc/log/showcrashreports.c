@@ -33,8 +33,7 @@ __static_yoink("__die");                       // for backtracing
 __static_yoink("ShowBacktrace");               // for backtracing
 __static_yoink("GetSymbolTable");              // for backtracing
 __static_yoink("PrintBacktraceUsingSymbols");  // for backtracing
-__static_yoink("__demangle");                  // for pretty c++ symbols
-__static_yoink("malloc_inspect_all");          // for asan memory origin
+__static_yoink("cosmo_demangle");              // for pretty c++ symbols
 __static_yoink("GetSymbolByAddr");             // for asan memory origin
 #endif
 
@@ -82,11 +81,7 @@ void ShowCrashReports(void) {
   ss.ss_sp = crashstack;
   unassert(!sigaltstack(&ss, 0));
   InstallCrashHandler(SIGQUIT, 0);
-#ifdef __x86_64__
   InstallCrashHandler(SIGTRAP, 0);
-#else
-  InstallCrashHandler(SIGTRAP, 0);
-#endif
   InstallCrashHandler(SIGFPE, 0);
   InstallCrashHandler(SIGILL, 0);
   InstallCrashHandler(SIGBUS, 0);

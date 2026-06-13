@@ -21,6 +21,8 @@
 #include "libc/calls/sig.internal.h"
 #include "libc/calls/struct/sigset.h"
 #include "libc/calls/struct/sigset.internal.h"
+#include "libc/calls/struct/timespec.h"
+#include "libc/cosmotime.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/intrin/atomic.h"
@@ -49,12 +51,21 @@ int sigsuspend(const sigset_t *ignore) {
 
   if (IsXnu() || IsOpenbsd()) {
     // openbsd and xnu use a 32 signal register convention
-    rc = sys_sigsuspend(ignore ? (void *)(intptr_t)(uint32_t)*ignore : 0, 8);
+    rc = sys_sigsuspend(
+        ignore ? (void *)(intptr_t)(uint32_t)__linux2mask(*ignore) : 0, 8);
   } else {
-    sigset_t waitmask = ignore ? *ignore : 0;
-    if (IsWindows() || IsMetal()) {
-      while (!(rc = _park_norestart(-1u, waitmask)))
-        donothing;
+    sigset_t waitmask = ignore ? __linux2mask(*ignore) : 0;
+    if (IsWindows()) {
+      // we don't strictly need to block signals, but it reduces signal
+      // delivery latency, by preventing other threads from delivering a
+      // signal asynchronously. it takes about ~5us to deliver a signal
+      // using SetEvent() whereas it takes ~30us to use SuspendThread(),
+      // GetThreadContext(), SetThreadContext(), and ResumeThread().
+      BLOCK_SIGNALS;
+      rc = _park_norestart(timespec_max, waitmask);
+      ALLOW_SIGNALS;
+    } else if (IsMetal()) {
+      rc = enosys();
     } else {
       rc = sys_sigsuspend((uint64_t[2]){waitmask}, 8);
     }

@@ -16,47 +16,34 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
-#include "libc/assert.h"
 #include "libc/calls/calls.h"
 #include "libc/errno.h"
-#include "libc/intrin/weaken.h"
 #include "libc/mem/mem.h"
 #include "libc/runtime/runtime.h"
 #include "libc/stdio/internal.h"
-#include "libc/stdio/stdio.h"
 
 /**
  * Closes standard i/o stream and its underlying thing.
- *
- * @param f is the file object
- * @return 0 on success or -1 on error, which can be a trick for
- *     differentiating between EOF and real errors during previous
- *     i/o calls, without needing to call ferror()
+ * @return 0 on success, or EOF w/ errno
  */
 int fclose(FILE *f) {
-  int rc;
-  if (!f)
-    return 0;
-  __fflush_unregister(f);
-  fflush(f);
-  if (_weaken(free)) {
-    _weaken(free)(f->getln);
-    if (!f->nofree && f->buf != f->mem) {
-      _weaken(free)(f->buf);
+  int rc = 0;
+  if (f) {
+    if (__isthreaded >= 2)
+      flockfile(f);
+    rc |= fflush_unlocked(f);
+    if (f->memstream_bufp) {
+      realloc_in_place(f->buf, f->beg + 1);
+      f->buf[f->beg] = 0;
     }
-  }
-  f->state = EOF;
-  if (f->noclose) {
+    int fd = f->fd;
     f->fd = -1;
-  } else if (f->fd != -1 && close(f->fd) == -1) {
-    f->state = errno;
+    f->state = EOF;
+    if (fd != -1)
+      rc |= close(fd);
+    if (__isthreaded >= 2)
+      funlockfile(f);
+    __stdio_unref(f);
   }
-  if (f->state == EOF) {
-    rc = 0;
-  } else {
-    errno = f->state;
-    rc = EOF;
-  }
-  __stdio_free(f);
   return rc;
 }

@@ -18,8 +18,14 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/macros.h"
 
-	.bss
+	.section .bss.rarechange,"aw",@nobits
 	.balign	8
 __hostos:
 	.quad	0
-	.endfn	__hostos,globl
+	.endobj	__hostos,globl
+__tls_index:
+	.long	0
+	.endobj	__tls_index,globl
+__tls_enabled:
+	.long	0
+	.endobj	__tls_enabled,globl

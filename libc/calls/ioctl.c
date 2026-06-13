@@ -24,6 +24,7 @@
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/intrin/cmpxchg.h"
+#include "libc/intrin/describeflags.h"
 #include "libc/intrin/fds.h"
 #include "libc/intrin/strace.h"
 #include "libc/intrin/weaken.h"
@@ -38,6 +39,7 @@
 #include "libc/nt/iphlpapi.h"
 #include "libc/nt/runtime.h"
 #include "libc/nt/struct/ipadapteraddresses.h"
+#include "libc/nt/thunk/msabi.h"
 #include "libc/nt/winsock.h"
 #include "libc/runtime/runtime.h"
 #include "libc/runtime/stack.h"
@@ -54,10 +56,14 @@
 #include "libc/sysv/consts/sio.h"
 #include "libc/sysv/consts/termios.h"
 #include "libc/sysv/errfuns.h"
+#include "libc/sysv/errno.h"
+#include "libc/sysv/pib.h"
 
 /* Maximum number of unicast addresses handled for each interface */
 #define MAX_UNICAST_ADDR 32
 #define MAX_NAME_CLASH   ((int)('z' - 'a')) /* Allow a..z */
+
+__msabi extern typeof(__sys_ioctlsocket_nt) *const __imp_ioctlsocket;
 
 static struct HostAdapterInfoNode {
   struct HostAdapterInfoNode *next;
@@ -74,9 +80,9 @@ static int ioctl_default(int fd, unsigned long request, void *arg) {
   if (!IsWindows()) {
     return sys_ioctl(fd, request, arg);
   } else if (__isfdopen(fd)) {
-    if (g_fds.p[fd].kind == kFdSocket) {
-      handle = g_fds.p[fd].handle;
-      if ((rc = _weaken(__sys_ioctlsocket_nt)(handle, request, arg)) != -1) {
+    if (__get_pib()->fds.p[fd].kind == kFdSocket) {
+      handle = __get_pib()->fds.p[fd].handle;
+      if ((rc = __imp_ioctlsocket(handle, request, arg)) != -1) {
         return rc;
       } else {
         return _weaken(__winsockerr)();
@@ -95,20 +101,20 @@ static int ioctl_fionread(int fd, uint32_t *arg) {
   if (!IsWindows()) {
     return sys_ioctl(fd, FIONREAD, arg);
   } else if (__isfdopen(fd)) {
-    handle = g_fds.p[fd].handle;
-    if (g_fds.p[fd].kind == kFdSocket) {
-      if ((rc = _weaken(__sys_ioctlsocket_nt)(handle, FIONREAD, arg)) != -1) {
+    handle = __get_pib()->fds.p[fd].handle;
+    if (__get_pib()->fds.p[fd].kind == kFdSocket) {
+      if ((rc = __imp_ioctlsocket(handle, FIONREAD, arg)) != -1) {
         return rc;
       } else {
         return _weaken(__winsockerr)();
       }
-    } else if (g_fds.p[fd].kind == kFdConsole) {
+    } else if (__get_pib()->fds.p[fd].kind == kFdConsole) {
       int bytes = CountConsoleInputBytes();
       *arg = MAX(0, bytes);
       return 0;
-    } else if (g_fds.p[fd].kind == kFdDevNull) {
+    } else if (__get_pib()->fds.p[fd].kind == kFdDevNull) {
       return enotty();
-    } else if (g_fds.p[fd].kind == kFdDevRandom) {
+    } else if (__get_pib()->fds.p[fd].kind == kFdDevRandom) {
       return einval();
     } else if (GetFileType(handle) == kNtFileTypePipe) {
       uint32_t avail;
@@ -413,20 +419,17 @@ static textwindows int readAdapterAddresses(void) {
                             // kNtGaaFlagIncludePrefix,
                             NULL, aa, &size);
   if (rc != kNtErrorSuccess) {
-    errno = GetLastError();
+    errno = __errno_windows2linux(GetLastError());
     goto err;
   }
-  if (createHostInfo(aa) == -1) {
+  if (createHostInfo(aa) == -1)
     goto err;
-  }
-  if (_weaken(free)) {
+  if (_weaken(free))
     _weaken(free)(aa);
-  }
   return 0;
 err:
-  if (_weaken(free)) {
+  if (_weaken(free))
     _weaken(free)(aa);
-  }
   freeHostInfo();
   return -1;
 }
@@ -719,6 +722,7 @@ int ioctl(int fd, unsigned long request, ...) {
   } else {
     rc = ioctl_default(fd, request, arg);
   }
-  STRACE("ioctl(%d, %#lx, %p) → %d% m", fd, request, arg, rc);
+  STRACE("ioctl(%d, %s, %p) → %d% m", fd, DescribeIoctlRequest(request), arg,
+         rc);
   return rc;
 }

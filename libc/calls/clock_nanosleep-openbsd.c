@@ -19,13 +19,14 @@
 #include "libc/calls/struct/timespec.h"
 #include "libc/calls/struct/timespec.internal.h"
 #include "libc/calls/syscall-sysv.internal.h"
+#include "libc/cosmotime.h"
 #include "libc/errno.h"
 #include "libc/sysv/consts/clock.h"
 #include "libc/sysv/errfuns.h"
 
-int sys_clock_nanosleep_openbsd(int clock, int flags,
-                                const struct timespec *req,
-                                struct timespec *rem) {
+relegated int sys_clock_nanosleep_openbsd(int clock, int flags,
+                                          const struct timespec *req,
+                                          struct timespec *rem) {
   int res;
   struct timespec start, relative, remainder;
   if (!flags) {

@@ -21,6 +21,8 @@
 #include "libc/calls/struct/iovec.h"
 #include "libc/calls/struct/iovec.internal.h"
 #include "libc/dce.h"
+#include "libc/intrin/describeflags.h"
+#include "libc/intrin/kprintf.h"
 #include "libc/intrin/strace.h"
 #include "libc/nt/winsock.h"
 #include "libc/sock/internal.h"
@@ -49,7 +51,7 @@
  *     EPIPE (if MSG_NOSIGNAL), EMSGSIZE, ENOTSOCK, EFAULT, etc.
  * @cancelationpoint
  * @asyncsignalsafe
- * @restartable (unless SO_RCVTIMEO)
+ * @restartable (unless SO_RCVTIMEO on Linux or Windows)
  */
 ssize_t recvfrom(int fd, void *buf, size_t size, int flags,
                  struct sockaddr *opt_out_srcaddr,
@@ -59,7 +61,12 @@ ssize_t recvfrom(int fd, void *buf, size_t size, int flags,
   uint32_t addrsize = sizeof(addr);
   BEGIN_CANCELATION_POINT;
 
-  if (fd < g_fds.n && g_fds.p[fd].kind == kFdZip) {
+  if ((size && kisdangerous(buf)) ||
+      (opt_inout_srcaddrsize &&
+       (kisdangerous(opt_inout_srcaddrsize) ||
+        (*opt_inout_srcaddrsize && kisdangerous(opt_out_srcaddr))))) {
+    rc = efault();
+  } else if (__isfdkind(fd, kFdZip)) {
     rc = enotsock();
   } else if (!IsWindows()) {
     rc = sys_recvfrom(fd, buf, size, flags, &addr, &addrsize);
@@ -95,7 +102,11 @@ ssize_t recvfrom(int fd, void *buf, size_t size, int flags,
   }
 
   END_CANCELATION_POINT;
-  DATATRACE("recvfrom(%d, [%#.*hhs%s], %'zu, %#x) → %'ld% lm", fd,
-            MAX(0, MIN(40, rc)), buf, rc > 40 ? "..." : "", size, flags, rc);
+  DATATRACE(
+      "recvfrom(%d, [%#.*hhs%s], %'zu, %s, %s) → %'ld% lm", fd,
+      MAX(0, MIN(40, rc)), buf, rc > 40 ? "..." : "", size, DescribeMsg(flags),
+      DescribeSockaddr(opt_out_srcaddr,
+                       opt_inout_srcaddrsize ? *opt_inout_srcaddrsize : 0),
+      rc);
   return rc;
 }

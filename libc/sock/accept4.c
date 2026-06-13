@@ -26,9 +26,20 @@
 #include "libc/sock/struct/sockaddr.internal.h"
 #include "libc/sock/syscall_fd.internal.h"
 #include "libc/sysv/errfuns.h"
+#include "libc/sysv/pib.h"
 
 /**
  * Creates client socket file descriptor for incoming connection.
+ *
+ * When `fd` is in `O_NONBLOCK` mode, this function will raise `EAGAIN`
+ * when no client is available to accept. To wait until a client exists
+ * the poll() function may be called using `POLLIN`.
+ *
+ * On Linux, your `SO_RCVTIMEO` will timeout accept4(). Other OSes (i.e.
+ * Windows, MacOS, and BSDs) do not support this and will block forever.
+ *
+ * On Windows, when this function blocks, there may be a 10 millisecond
+ * delay on the handling of signals or thread cancelation.
  *
  * @param fd is the server socket file descriptor
  * @param opt_out_addr will receive the remote address
@@ -36,6 +47,7 @@
  * @param flags can have SOCK_{CLOEXEC,NONBLOCK}, which may apply to
  *     both the newly created socket and the server one
  * @return client fd which needs close(), or -1 w/ errno
+ * @raise EAGAIN if `O_NONBLOCK` and no clients pending
  * @cancelationpoint
  * @asyncsignalsafe
  * @restartable (unless SO_RCVTIMEO)
@@ -46,14 +58,14 @@ int accept4(int fd, struct sockaddr *opt_out_addr, uint32_t *opt_inout_addrsize,
   struct sockaddr_storage ss = {0};
   BEGIN_CANCELATION_POINT;
 
-  if (fd < g_fds.n && g_fds.p[fd].kind == kFdZip) {
+  if (__isfdkind(fd, kFdZip)) {
     rc = enotsock();
   } else if (!IsWindows()) {
     rc = sys_accept4(fd, &ss, flags);
   } else if (!__isfdopen(fd)) {
     rc = ebadf();
   } else if (__isfdkind(fd, kFdSocket)) {
-    rc = sys_accept_nt(g_fds.p + fd, &ss, flags);
+    rc = sys_accept_nt(__get_pib()->fds.p + fd, &ss, flags);
   } else {
     rc = enotsock();
   }

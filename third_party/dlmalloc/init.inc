@@ -1,134 +1,75 @@
-#include "libc/sysv/consts/auxv.h"
-#include "libc/runtime/runtime.h"
-#include "libc/runtime/runtime.h"
 
-/* ---------------------------- setting mparams -------------------------- */
-
-#if LOCK_AT_FORK
-#if ONLY_MSPACES
-
-static void dlmalloc_pre_fork(void) {
-  mstate h;
-  for (unsigned i = 0; i < ARRAYLEN(g_heaps); ++i)
-    if ((h = atomic_load_explicit(&g_heaps[i], memory_order_acquire)))
-      ACQUIRE_LOCK(&h->mutex);
+void dlmalloc_pre_fork(void) {
+  if (__isthreaded < 2)
+    return;
+  ACQUIRE_LOCK(&g_gil);
+  for (long i = 0; i < COSMO_SHARDS; ++i)
+    if (g_heaps[i].state.magic)
+      ACQUIRE_LOCK(&g_heaps[i].state.mutex);
 }
 
-static void dlmalloc_post_fork_parent(void) {
-  mstate h;
-  for (unsigned i = 0; i < ARRAYLEN(g_heaps); ++i)
-    if ((h = atomic_load_explicit(&g_heaps[i], memory_order_acquire)))
-      RELEASE_LOCK(&h->mutex);
+void dlmalloc_post_fork_parent(void) {
+  if (__isthreaded < 2)
+    return;
+  for (long i = COSMO_SHARDS; i--;)
+    if (g_heaps[i].state.magic)
+      RELEASE_LOCK(&g_heaps[i].state.mutex);
+  RELEASE_LOCK(&g_gil);
 }
 
-static void dlmalloc_post_fork_child(void) {
-  mstate h;
-  for (unsigned i = 0; i < ARRAYLEN(g_heaps); ++i)
-    if ((h = atomic_load_explicit(&g_heaps[i], memory_order_acquire)))
-      (void)INITIAL_LOCK(&h->mutex);
+void dlmalloc_post_fork_child(void) {
+  for (long i = 0; i < COSMO_SHARDS; ++i)
+    if (g_heaps[i].state.magic)
+      REFRESH_LOCK(&g_heaps[i].state.mutex);
+  REFRESH_LOCK(&g_gil);
 }
-
-#else
-static void dlmalloc_pre_fork(void)         { ACQUIRE_LOCK(&(gm)->mutex); }
-static void dlmalloc_post_fork_parent(void) { RELEASE_LOCK(&(gm)->mutex); }
-static void dlmalloc_post_fork_child(void)  { (void)INITIAL_LOCK(&(gm)->mutex); }
-#endif /* ONLY_MSPACES */
-#endif /* LOCK_AT_FORK */
 
 /* Initialize mparams */
-__attribute__((__constructor__(49))) int init_mparams(void) {
-#ifdef NEED_GLOBAL_LOCK_INIT
-  if (malloc_global_mutex_status <= 0)
-    init_malloc_global_mutex();
-#endif
+__attribute__((__constructor__(49))) void init_mparams(void) {
+  size_t magic, psize, gsize;
 
-  // ACQUIRE_MALLOC_GLOBAL_LOCK();
-  if (mparams.magic == 0) {
-    size_t magic;
-    size_t psize;
-    size_t gsize;
+  psize = __pagesize;
+  gsize = DEFAULT_GRANULARITY ? DEFAULT_GRANULARITY : __gransize;
 
-#if defined(__COSMOPOLITAN__)
-    psize = getpagesize();
-    gsize = DEFAULT_GRANULARITY ? DEFAULT_GRANULARITY : psize;
-#elif !defined(WIN32)
-    psize = malloc_getpagesize;
-    gsize = ((DEFAULT_GRANULARITY != 0)? DEFAULT_GRANULARITY : psize);
-#else /* WIN32 */
-    {
-      SYSTEM_INFO system_info;
-      GetSystemInfo(&system_info);
-      psize = system_info.dwPageSize;
-      gsize = ((DEFAULT_GRANULARITY != 0)?
-               DEFAULT_GRANULARITY : system_info.dwAllocationGranularity);
-    }
-#endif /* WIN32 */
+  /* Sanity-check configuration:
+     size_t must be unsigned and as wide as pointer type.
+     ints must be at least 4 bytes.
+     alignment must be at least 8.
+     Alignment, min chunk size, and page size must all be powers of 2.
+  */
+  static_assert(sizeof(size_t) == sizeof(char*));
+  static_assert(MAX_SIZE_T >= MIN_CHUNK_SIZE);
+  static_assert(MALLOC_ALIGNMENT >= (size_t)8U);
+  static_assert(MALLOC_ALIGNMENT >= (size_t)8U);
+  static_assert((MALLOC_ALIGNMENT & (MALLOC_ALIGNMENT-SIZE_T_ONE)) == 0);
+  static_assert((MCHUNK_SIZE      & (MCHUNK_SIZE-SIZE_T_ONE))      == 0);
+  unassert(     (gsize            & (gsize-SIZE_T_ONE))            == 0 &&
+                (psize            & (psize-SIZE_T_ONE))            == 0);
+  mparams.granularity = gsize;
+  mparams.page_size = psize;
+  mparams.mmap_threshold = DEFAULT_MMAP_THRESHOLD;
+  mparams.trim_threshold = DEFAULT_TRIM_THRESHOLD;
+  mparams.default_mflags = USE_LOCK_BIT|USE_MMAP_BIT|USE_NONCONTIGUOUS_BIT;
 
-    /* Sanity-check configuration:
-       size_t must be unsigned and as wide as pointer type.
-       ints must be at least 4 bytes.
-       alignment must be at least 8.
-       Alignment, min chunk size, and page size must all be powers of 2.
-    */
-    if ((sizeof(size_t) != sizeof(char*)) ||
-        (MAX_SIZE_T < MIN_CHUNK_SIZE)  ||
-        (sizeof(int) < 4)  ||
-        (MALLOC_ALIGNMENT < (size_t)8U) ||
-        ((MALLOC_ALIGNMENT & (MALLOC_ALIGNMENT-SIZE_T_ONE)) != 0) ||
-        ((MCHUNK_SIZE      & (MCHUNK_SIZE-SIZE_T_ONE))      != 0) ||
-        ((gsize            & (gsize-SIZE_T_ONE))            != 0) ||
-        ((psize            & (psize-SIZE_T_ONE))            != 0))
-      ABORT;
-    mparams.granularity = gsize;
-    mparams.page_size = psize;
-    mparams.mmap_threshold = DEFAULT_MMAP_THRESHOLD;
-    mparams.trim_threshold = DEFAULT_TRIM_THRESHOLD;
-#if MORECORE_CONTIGUOUS
-    mparams.default_mflags = USE_LOCK_BIT|USE_MMAP_BIT;
-#else  /* MORECORE_CONTIGUOUS */
-    mparams.default_mflags = USE_LOCK_BIT|USE_MMAP_BIT|USE_NONCONTIGUOUS_BIT;
-#endif /* MORECORE_CONTIGUOUS */
+  magic = (size_t)(rdtsc() ^ (size_t)0x55555555U);
+  magic |= (size_t)8U;    /* ensure nonzero */
+  magic &= ~(size_t)7U;   /* improve chances of fault for bad values */
+  *(volatile size_t *)&mparams.magic = magic;
 
-#if !ONLY_MSPACES
-    /* Set up lock for main malloc area */
-    gm->mflags = mparams.default_mflags;
-    (void)INITIAL_LOCK(&gm->mutex);
-#endif
+  // Initialize threaded allocator for main thread.
+  __get_tls()->tib_malloc = tmspace_acquire();
 
-#if LOCK_AT_FORK
-    pthread_atfork(&dlmalloc_pre_fork,
-                   &dlmalloc_post_fork_parent,
-                   &dlmalloc_post_fork_child);
-#endif
-
-    {
-#if USE_DEV_RANDOM
-      int fd;
-      unsigned char buf[sizeof(size_t)];
-      /* Try to use /dev/urandom, else fall back on using time */
-      if ((fd = open("/dev/urandom", O_RDONLY)) >= 0 &&
-          read(fd, buf, sizeof(buf)) == sizeof(buf)) {
-        magic = *((size_t *) buf);
-        close(fd);
-      }
-      else
-#endif /* USE_DEV_RANDOM */
-      magic = (size_t)(_rand64() ^ (size_t)0x55555555U);
-      magic |= (size_t)8U;    /* ensure nonzero */
-      magic &= ~(size_t)7U;   /* improve chances of fault for bad values */
-      /* Until memory modes commonly available, use volatile-write */
-      (*(volatile size_t *)(&(mparams.magic))) = magic;
-    }
+  // Bolt on rseq allocator if Linux 4.18+ (c. 2018)
+  use_threaded_allocator();
+  if (HAVE_RSEQ) {
+    const char *s;
+    if ((s = getenv("COSMOPOLITAN_M_RSEQ_MAX")))
+      atomic_init(&rseq.max, strtol(s, 0, 0));
+    if (rseq.max)
+      use_rseq_allocator();
   }
 
-  // RELEASE_MALLOC_GLOBAL_LOCK();
-
-#if ONLY_MSPACES
-  threaded_dlmalloc();
-#endif
-
   __runlevel = RUNLEVEL_MALLOC;
-  return 1;
 }
 
 /* support for mallopt */
@@ -144,12 +85,24 @@ static int change_mparam(int param_number, int value) {
     if (val >= mparams.page_size && ((val & (val-1)) == 0)) {
       mparams.granularity = val;
       return 1;
-    }
-    else
+    } else {
       return 0;
+    }
   case M_MMAP_THRESHOLD:
     mparams.mmap_threshold = val;
     return 1;
+  case M_RSEQ_MAX:
+    if (HAVE_RSEQ) {
+      atomic_store_explicit(&rseq.max, val, memory_order_relaxed);
+      if (val) {
+        use_rseq_allocator();
+      } else if (never_used_rseq()) {
+        use_threaded_allocator();
+      }
+      return 1;
+    } else {
+      return 0;
+    }
   default:
     return 0;
   }

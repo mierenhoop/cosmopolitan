@@ -17,16 +17,18 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/intrin/fds.h"
+#include "libc/assert.h"
 #include "libc/calls/internal.h"
 #include "libc/calls/state.internal.h"
 #include "libc/calls/ttydefaults.h"
 #include "libc/dce.h"
 #include "libc/intrin/atomic.h"
-#include "libc/intrin/extend.h"
+#include "libc/intrin/kprintf.h"
 #include "libc/intrin/maps.h"
 #include "libc/intrin/nomultics.h"
 #include "libc/intrin/pushpop.h"
 #include "libc/intrin/weaken.h"
+#include "libc/macros.h"
 #include "libc/nt/console.h"
 #include "libc/nt/createfile.h"
 #include "libc/nt/enum/accessmask.h"
@@ -37,22 +39,14 @@
 #include "libc/nt/memory.h"
 #include "libc/nt/runtime.h"
 #include "libc/runtime/internal.h"
-#include "libc/runtime/memtrack.internal.h"
 #include "libc/runtime/runtime.h"
 #include "libc/sock/sock.h"
 #include "libc/sysv/consts/map.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
+#include "libc/sysv/pib.h"
 #include "libc/thread/thread.h"
-
-#define OPEN_MAX 16
-
-#ifdef __x86_64__
-__static_yoink("_init_fds");
-#endif
-
-struct Fds g_fds;
-static struct Fd g_fds_static[OPEN_MAX];
+#include "libc/thread/tls.h"
 
 static bool TokAtoi(const char **str, long *res) {
   int c, d;
@@ -85,20 +79,18 @@ static textwindows void SetupWinStd(struct Fds *fds, int i, uint32_t x) {
   atomic_store_explicit(&fds->f, i + 1, memory_order_relaxed);
 }
 
-textstartup void __init_fds(int argc, char **argv, char **envp) {
+textstartup void __init_fds(void) {
+
   struct Fds *fds;
-  fds = &g_fds;
-  fds->n = 4;
-  atomic_store_explicit(&fds->f, 3, memory_order_relaxed);
-  if (_weaken(_extend)) {
-    fds->p = fds->e = (void *)kMemtrackFdsStart;
-    fds->e =
-        _weaken(_extend)(fds->p, fds->n * sizeof(*fds->p), fds->e, MAP_PRIVATE,
-                         kMemtrackFdsStart + kMemtrackFdsSize);
-  } else {
-    fds->p = g_fds_static;
-    fds->e = g_fds_static + OPEN_MAX;
-  }
+  fds = &__get_pib()->fds;
+  atomic_init(&fds->f, 3);
+  size_t fds_map_size = ROUNDUP(sizeof(struct Fd) * 20000, __gransize);
+  fds->p = mmap(0, fds_map_size, PROT_READ | PROT_WRITE,
+                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (fds->p == MAP_FAILED)
+    _Exit(97);
+  fds->c = fds_map_size;
+  fds->n = 3;
 
   // inherit standard i/o file descriptors
   if (IsMetal()) {
@@ -122,13 +114,14 @@ textstartup void __init_fds(int argc, char **argv, char **envp) {
     }
   }
   fds->p[0].flags = O_RDONLY;
-  fds->p[1].flags = O_WRONLY | O_APPEND;
-  fds->p[2].flags = O_WRONLY | O_APPEND;
+  fds->p[1].flags = O_WRONLY;
+  fds->p[2].flags = O_WRONLY;
 
   // inherit file descriptors from cosmo parent process
   if (IsWindows()) {
     const char *fdspec;
     if ((fdspec = getenv("_COSMO_FDS_V2"))) {
+      char *smaddr = 0;
       unsetenv("_COSMO_FDS");
       unsetenv("_COSMO_FDS_V2");
       for (;;) {
@@ -151,8 +144,7 @@ textstartup void __init_fds(int argc, char **argv, char **envp) {
           break;
         if (!TokAtoi(&fdspec, &protocol))
           break;
-        if (_weaken(__ensurefds_unlocked))
-          _weaken(__ensurefds_unlocked)(fd);
+        __ensurefds_unlocked(fd);
         struct Fd *f = fds->p + fd;
         if (f->handle && f->handle != -1 && f->handle != handle) {
           CloseHandle(f->handle);
@@ -171,8 +163,13 @@ textstartup void __init_fds(int argc, char **argv, char **envp) {
         if (shand) {
           struct Map *map;
           struct CursorShared *shared;
+          if (!smaddr) {
+            smaddr = __maps_randaddr();
+          } else {
+            smaddr += 65536;
+          }
           if ((shared = MapViewOfFileEx(shand, kNtFileMapWrite, 0, 0,
-                                        sizeof(struct CursorShared), 0))) {
+                                        sizeof(struct CursorShared), smaddr))) {
             if ((f->cursor = _mapanon(sizeof(struct Cursor)))) {
               f->cursor->shared = shared;
               if ((map = __maps_alloc())) {
@@ -182,7 +179,9 @@ textstartup void __init_fds(int argc, char **argv, char **envp) {
                 map->prot = PROT_READ | PROT_WRITE;
                 map->flags = MAP_SHARED | MAP_ANONYMOUS;
                 map->hand = shand;
+                __maps_lock();
                 __maps_insert(map);
+                __maps_unlock();
               }
             }
           }

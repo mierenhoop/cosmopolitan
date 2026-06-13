@@ -17,19 +17,35 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/assert.h"
+#include "libc/calls/internal.h"
+#include "libc/calls/state.internal.h"
 #include "libc/intrin/atomic.h"
 #include "libc/intrin/fds.h"
 #include "libc/runtime/runtime.h"
+#include "libc/sysv/pib.h"
+#include "libc/thread/posixthread.internal.h"
+
+// did you know that current seek position of a file descriptor can be
+// shared by multiple file descriptors across multiple processes? it's
+// very expensive to support this, but we're going to do our very best
+
+void __cursor_destroy(struct Cursor *c) {
+  munmap(c->shared, sizeof(struct CursorShared));
+  munmap(c, sizeof(struct Cursor));
+}
 
 struct Cursor *__cursor_new(void) {
+  // assume __fds_lock() is held
   struct Cursor *c;
+  if ((c = __get_pib()->fds.freed_cursors)) {
+    __get_pib()->fds.freed_cursors = c->next_free_cursor;
+    atomic_init(&c->refs, 0);
+    c->shared->pointer = 0;
+    return c;
+  }
   if ((c = _mapanon(sizeof(struct Cursor)))) {
     if ((c->shared = _mapshared(sizeof(struct CursorShared)))) {
-      pthread_mutexattr_t attr;
-      pthread_mutexattr_init(&attr);
-      pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
-      pthread_mutex_init(&c->shared->lock, &attr);
-      pthread_mutexattr_destroy(&attr);
+      c->shared->lock = (pthread_mutex_t)PTHREAD_SHARED_MUTEX_INITIALIZER_NP;
     } else {
       munmap(c, sizeof(struct Cursor));
       c = 0;
@@ -38,21 +54,27 @@ struct Cursor *__cursor_new(void) {
   return c;
 }
 
-void __cursor_ref(struct Cursor *c) {
+bool __cursor_ref(struct Cursor *c) {
   if (!c)
-    return;
-  unassert(atomic_fetch_add_explicit(&c->refs, 1, memory_order_relaxed) >= 0);
+    return false;
+  return atomic_fetch_add_explicit(&c->refs, 1, memory_order_relaxed) >= 0;
 }
 
-int __cursor_unref(struct Cursor *c) {
-  if (!c)
-    return 0;
+void __cursor_unref(struct Cursor *c) {
   if (atomic_fetch_sub_explicit(&c->refs, 1, memory_order_release))
-    return 0;
-  atomic_thread_fence(memory_order_acquire);
-  int rc = munmap(c->shared, sizeof(struct CursorShared));
-  rc |= munmap(c, sizeof(struct Cursor));
-  return rc;
+    return;
+  // we've now established that, within this process, no file descriptor
+  // exists that's using this cursor. however while the cursor was being
+  // used, fork() or execve() could have enabled it to spread elsewhere!
+  __fds_lock();
+  if (!c->is_multiprocess) {
+    c->next_free_cursor = __get_pib()->fds.freed_cursors;
+    __get_pib()->fds.freed_cursors = c;
+    __fds_unlock();
+  } else {
+    __fds_unlock();
+    __cursor_destroy(c);
+  }
 }
 
 void __cursor_lock(struct Cursor *c) {

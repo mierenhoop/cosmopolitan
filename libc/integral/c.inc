@@ -42,10 +42,6 @@ typedef __CHAR32_TYPE__ char32_t;
 #endif
 #endif /* __cplusplus */
 
-#ifndef __COSMOCC__
-#include "libc/stdbool.h"
-#endif
-
 typedef int errno_t;
 typedef __SIZE_TYPE__ size_t;
 typedef __PTRDIFF_TYPE__ ssize_t;
@@ -64,6 +60,26 @@ typedef __INT64_TYPE__ int64_t;
 typedef __UINT64_TYPE__ uint64_t;
 typedef __INTMAX_TYPE__ intmax_t;
 typedef __UINTMAX_TYPE__ uintmax_t;
+
+/* TODO(jart): re-import compiler-rt once they have it */
+#if defined(__x86_64__) && defined(__FLT128_MAX_10_EXP__)
+#undef __FLT128_MAX_10_EXP__
+#undef __FLT128_DENORM_MIN__
+#undef __FLT128_MIN_EXP__
+#undef __FLT128_MIN_10_EXP__
+#undef __FLT128_MANT_DIG__
+#undef __FLT128_HAS_INFINITY__
+#undef __FLT128_EPSILON__
+#undef __FLT128_MAX_EXP__
+#undef __FLT128_HAS_DENORM__
+#undef __FLT128_DIG__
+#undef __FLT128_MIN__
+#undef __FLT128_MAX__
+#undef __FLT128_NORM_MAX__
+#undef __FLT128_HAS_QUIET_NAN__
+#undef __FLT128_IS_IEC_60559__
+#undef __FLT128_DECIMAL_DIG__
+#endif
 
 #define __DEFINED_max_align_t
 typedef long double max_align_t;
@@ -99,7 +115,6 @@ typedef struct {
   libcesque __wur returnsaligned((65536)) returnspointerwithnoaliases
 #define reallocesque libcesque returnsaligned((16))
 #define mallocesque  reallocesque returnspointerwithnoaliases
-#define interruptfn  nocallersavedregisters forcealignargpointer
 
 #ifndef pureconst
 #define pureconst __attribute__((__const__))
@@ -114,8 +129,8 @@ typedef struct {
 #define scanfesque(n)    __attribute__((__format__(__gnu_scanf__, n, n + 1)))
 #define strftimeesque(n) __attribute__((__format__(__strftime__, n, 0)))
 
-#ifndef privileged
-#define privileged _Section(".privileged") dontinline dontinstrument dontubsan
+#ifndef __privileged
+#define __privileged _Section(".privileged") dontinstrument dontubsan
 #endif
 
 #ifndef wontreturn

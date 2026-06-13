@@ -69,8 +69,6 @@ char linkbuf[PATH_MAX];
 
 void Cp(char *, char *);
 
-#include "libc/mem/tinymalloc.inc"
-
 bool IsDirectory(const char *path) {
   int e;
   bool res;
@@ -92,7 +90,7 @@ bool IsSymlink(const char *path) {
   return res;
 }
 
-wontreturn void PrintUsage(int rc, int fd) {
+[[noreturn]] void PrintUsage(int rc, int fd) {
   tinyprint(fd, "USAGE\n\n  ", prog, USAGE, NULL);
   exit(rc);
 }

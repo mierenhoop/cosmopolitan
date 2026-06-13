@@ -17,8 +17,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/stdio/internal.h"
-#include "libc/stdio/stdio.h"
-#include "libc/thread/thread.h"
+#include "libc/thread/posixthread.internal.h"
 
 /**
  * Releases lock on stdio object.

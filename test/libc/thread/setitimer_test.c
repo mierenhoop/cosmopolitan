@@ -24,6 +24,7 @@
 #include "libc/calls/struct/sigset.h"
 #include "libc/calls/struct/timeval.h"
 #include "libc/calls/ucontext.h"
+#include "libc/cosmotime.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/limits.h"

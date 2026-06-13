@@ -17,36 +17,21 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/atomic.h"
+#include "libc/fmt/internal.h"
 #include "libc/intrin/atomic.h"
 #include "libc/runtime/internal.h"
-
-static textwindows char16_t *itoa16(char16_t p[21], uint64_t x) {
-  char t;
-  size_t a, b, i = 0;
-  do {
-    p[i++] = x % 10 + '0';
-    x = x / 10;
-  } while (x > 0);
-  if (i) {
-    for (a = 0, b = i - 1; a < b; ++a, --b) {
-      t = p[a];
-      p[a] = p[b];
-      p[b] = t;
-    }
-  }
-  return p + i;
-}
+#include "libc/sysv/pib.h"
 
 // This function is called very early by WinMain().
 textwindows char16_t *__create_pipe_name(char16_t *a) {
   char16_t *p = a;
-  const char *q = "\\\\?\\pipe\\cosmo\\";
+  const char *q = "\\\\.\\pipe\\cosmo\\";
   static atomic_uint x;
   while (*q)
     *p++ = *q++;
-  p = itoa16(p, __pid);
+  p = __itoa16(p, __get_pib()->pid);
   *p++ = '-';
-  p = itoa16(p, atomic_fetch_add(&x, 1));
+  p = __itoa16(p, atomic_fetch_add(&x, 1));
   *p = 0;
   return a;
 }

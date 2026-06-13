@@ -45,13 +45,12 @@
  * @asyncsignalsafe
  */
 void *memccpy(void *dst, const void *src, int c, size_t n) {
-  char *d;
   size_t i;
-  const char *s;
-  for (d = dst, s = src, i = 0; i < n; ++i) {
-    if (((d[i] = s[i]) & 255) == (c & 255)) {
-      return d + i + 1;
-    }
+  unsigned char *x;
+  const unsigned char *y;
+  for (c &= 255, x = dst, y = src, i = 0; i < n; ++i) {
+    if ((x[i] = y[i]) == c)
+      return x + i + 1;
   }
   return 0;
 }

@@ -34,7 +34,7 @@
 #include "libc/sysv/consts/o.h"
 #include "libc/sysv/consts/prot.h"
 #include "libc/sysv/errfuns.h"
-
+#include "libc/sysv/pib.h"
 #ifdef __x86_64__
 
 int sys_openat_metal(int dirfd, const char *file, int flags, unsigned mode) {
@@ -49,11 +49,9 @@ int sys_openat_metal(int dirfd, const char *file, int flags, unsigned mode) {
   if ((fd = __reservefd(-1)) == -1)
     return -1;
   if (!_weaken(calloc) || !_weaken(free)) {
-    struct DirectMap dm;
-    dm = sys_mmap_metal(NULL, ROUNDUP(sizeof(struct MetalFile), 4096),
-                        PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1,
-                        0);
-    state = dm.addr;
+    state = sys_mmap_metal(NULL, ROUNDUP(sizeof(struct MetalFile), 4096),
+                           PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS,
+                           -1, 0);
     if (state == (void *)-1)
       return -1;
   } else {
@@ -63,10 +61,10 @@ int sys_openat_metal(int dirfd, const char *file, int flags, unsigned mode) {
   }
   state->base = (char *)__ape_com_base;
   state->size = __ape_com_size;
-  g_fds.p[fd].kind = kFdFile;
-  g_fds.p[fd].flags = flags;
-  g_fds.p[fd].mode = mode;
-  g_fds.p[fd].handle = (intptr_t)state;
+  __get_pib()->fds.p[fd].kind = kFdFile;
+  __get_pib()->fds.p[fd].flags = flags;
+  __get_pib()->fds.p[fd].mode = mode;
+  __get_pib()->fds.p[fd].handle = (intptr_t)state;
   return fd;
 }
 

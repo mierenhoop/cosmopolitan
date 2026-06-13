@@ -16,6 +16,8 @@
 │ TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR             │
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
+#include "libc/str/str.h"
+#include "libc/thread/lock.h"
 #include "libc/thread/thread.h"
 
 /**
@@ -24,7 +26,7 @@
  *     pthread_mutex_t lock;
  *     pthread_mutexattr_t attr;
  *     pthread_mutexattr_init(&attr);
- *     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
+ *     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_DEFAULT);
  *     pthread_mutex_init(&lock, &attr);
  *     pthread_mutexattr_destroy(&attr);
  *     // ...
@@ -35,6 +37,8 @@
  */
 int pthread_mutex_init(pthread_mutex_t *mutex,
                        const pthread_mutexattr_t *attr) {
-  *mutex = (pthread_mutex_t){._word = attr ? attr->_word : 0};
+  bzero(mutex, sizeof(*mutex));
+  if (attr)
+    mutex->_word = attr->_word;
   return 0;
 }

@@ -15,20 +15,54 @@ mode() {
   esac
 }
 
+_nproc() {
+  case $(uname -s) in
+    Darwin) sysctl -n hw.logicalcpu ;;
+    *)      nproc                   ;;
+  esac
+}
+
+TMPDIR=${TMPDIR:-/tmp}
 OUTDIR=${1:-cosmocc}
 APELINK=o/$(mode)/tool/build/apelink
+DEDUPE=o/$(mode)/tool/build/dedupe
 AMD64=${2:-x86_64}
 ARM64=${3:-aarch64}
-NPROC=$(($(nproc)/2))
+NPROC=$(($(_nproc)/2))
 GCCVER=14.1.0
 
-make -j$NPROC m= \
-  $APELINK
+if ! MAKE=$(command -v gmake); then
+  if ! MAKE=$(command -v make); then
+    echo please install gnu make >&2
+    exit 1
+  fi
+fi
 
-make -j$NPROC m=$AMD64 \
+$MAKE -j$NPROC m= \
+  $APELINK $DEDUPE
+
+if ! APE=$(command -v ape); then
+  case $(uname -s) in
+    Darwin)
+      case $(mode) in
+        aarch64)
+          cc -O -o "$TMPDIR/ape.$$" .cosmocc/current/bin/ape-m1.c || exit
+          trap 'rm "$TMPDIR/ape.$$"' EXIT
+          APE=$TMPDIR/ape.$$
+        ;;
+        *) APE=.cosmocc/current/bin/ape-x86_64.macho ;;
+      esac
+      ;;
+    *) APE=.cosmocc/current/bin/ape-$(uname -m).elf ;;
+  esac
+fi
+stat $APE
+
+$MAKE -j$NPROC m=$AMD64 \
   o/cosmocc.h.txt \
   o/$AMD64/ape/ape.lds \
   o/$AMD64/libc/crt/crt.o \
+  o/$AMD64/libc/crt/crtfastmath.o \
   o/$AMD64/ape/ape.elf \
   o/$AMD64/ape/ape.macho \
   o/$AMD64/ape/ape.o \
@@ -40,6 +74,7 @@ make -j$NPROC m=$AMD64 \
   o/$AMD64/tool/build/march-native.dbg \
   o/$AMD64/tool/build/mktemper.dbg \
   o/$AMD64/tool/build/fixupobj.dbg \
+  o/$AMD64/tool/build/tlscc.dbg \
   o/$AMD64/tool/build/zipcopy.dbg \
   o/$AMD64/tool/build/mkdeps.dbg \
   o/$AMD64/tool/build/zipobj.dbg \
@@ -62,10 +97,11 @@ make -j$NPROC m=$AMD64 \
   o/$AMD64/third_party/make/make.dbg \
   o/$AMD64/third_party/ctags/ctags.dbg
 
-make -j$NPROC m=$AMD64-tiny \
+$MAKE -j$NPROC m=$AMD64-tiny \
   o/cosmocc.h.txt \
   o/$AMD64-tiny/ape/ape.lds \
   o/$AMD64-tiny/libc/crt/crt.o \
+  o/$AMD64-tiny/libc/crt/crtfastmath.o \
   o/$AMD64-tiny/ape/ape.elf \
   o/$AMD64-tiny/ape/ape.macho \
   o/$AMD64-tiny/ape/ape.o \
@@ -74,10 +110,24 @@ make -j$NPROC m=$AMD64-tiny \
   o/$AMD64-tiny/cosmopolitan.a \
   o/$AMD64-tiny/third_party/libcxx/libcxx.a \
 
-make -j$NPROC m=$AMD64-dbg \
+$MAKE -j$NPROC m=$AMD64-sysv \
+  o/cosmocc.h.txt \
+  o/$AMD64-sysv/ape/ape.lds \
+  o/$AMD64-sysv/libc/crt/crt.o \
+  o/$AMD64-sysv/libc/crt/crtfastmath.o \
+  o/$AMD64-sysv/ape/ape.elf \
+  o/$AMD64-sysv/ape/ape.macho \
+  o/$AMD64-sysv/ape/ape.o \
+  o/$AMD64-sysv/ape/ape-copy-self.o \
+  o/$AMD64-sysv/ape/ape-no-modify-self.o \
+  o/$AMD64-sysv/cosmopolitan.a \
+  o/$AMD64-sysv/third_party/libcxx/libcxx.a \
+
+$MAKE -j$NPROC m=$AMD64-dbg \
   o/cosmocc.h.txt \
   o/$AMD64-dbg/ape/ape.lds \
   o/$AMD64-dbg/libc/crt/crt.o \
+  o/$AMD64-dbg/libc/crt/crtfastmath.o \
   o/$AMD64-dbg/ape/ape.elf \
   o/$AMD64-dbg/ape/ape.macho \
   o/$AMD64-dbg/ape/ape.o \
@@ -86,10 +136,11 @@ make -j$NPROC m=$AMD64-dbg \
   o/$AMD64-dbg/cosmopolitan.a \
   o/$AMD64-dbg/third_party/libcxx/libcxx.a \
 
-make CONFIG_TARGET_ARCH= -j$NPROC m=$AMD64-optlinux \
+$MAKE CONFIG_TARGET_ARCH= -j$NPROC m=$AMD64-optlinux \
   o/cosmocc.h.txt \
   o/$AMD64-optlinux/ape/ape.lds \
   o/$AMD64-optlinux/libc/crt/crt.o \
+  o/$AMD64-optlinux/libc/crt/crtfastmath.o \
   o/$AMD64-optlinux/ape/ape.elf \
   o/$AMD64-optlinux/ape/ape.macho \
   o/$AMD64-optlinux/ape/ape.o \
@@ -98,16 +149,31 @@ make CONFIG_TARGET_ARCH= -j$NPROC m=$AMD64-optlinux \
   o/$AMD64-optlinux/cosmopolitan.a \
   o/$AMD64-optlinux/third_party/libcxx/libcxx.a \
 
-make -j$NPROC m=$ARM64 \
+$MAKE CONFIG_TARGET_ARCH= -j$NPROC m=$AMD64-tinylinux \
+  o/cosmocc.h.txt \
+  o/$AMD64-tinylinux/ape/ape.lds \
+  o/$AMD64-tinylinux/libc/crt/crt.o \
+  o/$AMD64-tinylinux/libc/crt/crtfastmath.o \
+  o/$AMD64-tinylinux/ape/ape.elf \
+  o/$AMD64-tinylinux/ape/ape.macho \
+  o/$AMD64-tinylinux/ape/ape.o \
+  o/$AMD64-tinylinux/ape/ape-copy-self.o \
+  o/$AMD64-tinylinux/ape/ape-no-modify-self.o \
+  o/$AMD64-tinylinux/cosmopolitan.a \
+  o/$AMD64-tinylinux/third_party/libcxx/libcxx.a \
+
+$MAKE -j$NPROC m=$ARM64 \
   o/$ARM64/ape/ape.elf \
   o/$ARM64/ape/aarch64.lds \
   o/$ARM64/libc/crt/crt.o \
+  o/$ARM64/libc/crt/crtfastmath.o \
   o/$ARM64/cosmopolitan.a \
   o/$ARM64/third_party/libcxx/libcxx.a \
   o/$ARM64/tool/build/assimilate.dbg \
   o/$ARM64/tool/build/march-native.dbg \
   o/$ARM64/tool/build/mktemper.dbg \
   o/$ARM64/tool/build/fixupobj.dbg \
+  o/$ARM64/tool/build/tlscc.dbg \
   o/$ARM64/tool/build/zipcopy.dbg \
   o/$ARM64/tool/build/mkdeps.dbg \
   o/$ARM64/tool/build/zipobj.dbg \
@@ -130,34 +196,54 @@ make -j$NPROC m=$ARM64 \
   o/$ARM64/third_party/make/make.dbg \
   o/$ARM64/third_party/ctags/ctags.dbg
 
-make -j$NPROC m=$ARM64-tiny \
+$MAKE -j$NPROC m=$ARM64-tiny \
   o/$ARM64-tiny/ape/ape.elf \
   o/$ARM64-tiny/ape/aarch64.lds \
   o/$ARM64-tiny/libc/crt/crt.o \
+  o/$ARM64-tiny/libc/crt/crtfastmath.o \
   o/$ARM64-tiny/cosmopolitan.a \
   o/$ARM64-tiny/third_party/libcxx/libcxx.a \
 
-make -j$NPROC m=$ARM64-dbg \
+$MAKE -j$NPROC m=$ARM64-sysv \
+  o/$ARM64-sysv/ape/ape.elf \
+  o/$ARM64-sysv/ape/aarch64.lds \
+  o/$ARM64-sysv/libc/crt/crt.o \
+  o/$ARM64-sysv/libc/crt/crtfastmath.o \
+  o/$ARM64-sysv/cosmopolitan.a \
+  o/$ARM64-sysv/third_party/libcxx/libcxx.a \
+
+$MAKE -j$NPROC m=$ARM64-dbg \
   o/$ARM64-dbg/ape/ape.elf \
   o/$ARM64-dbg/ape/aarch64.lds \
   o/$ARM64-dbg/libc/crt/crt.o \
+  o/$ARM64-dbg/libc/crt/crtfastmath.o \
   o/$ARM64-dbg/cosmopolitan.a \
   o/$ARM64-dbg/third_party/libcxx/libcxx.a \
 
-make -j$NPROC m=$ARM64-optlinux \
+$MAKE -j$NPROC m=$ARM64-optlinux \
   o/$ARM64-optlinux/ape/ape.elf \
   o/$ARM64-optlinux/ape/aarch64.lds \
   o/$ARM64-optlinux/libc/crt/crt.o \
+  o/$ARM64-optlinux/libc/crt/crtfastmath.o \
   o/$ARM64-optlinux/cosmopolitan.a \
   o/$ARM64-optlinux/third_party/libcxx/libcxx.a \
+
+$MAKE -j$NPROC m=$ARM64-tinylinux \
+  o/$ARM64-tinylinux/ape/ape.elf \
+  o/$ARM64-tinylinux/ape/aarch64.lds \
+  o/$ARM64-tinylinux/libc/crt/crt.o \
+  o/$ARM64-tinylinux/libc/crt/crtfastmath.o \
+  o/$ARM64-tinylinux/cosmopolitan.a \
+  o/$ARM64-tinylinux/third_party/libcxx/libcxx.a \
 
 mkdir -p "$OUTDIR/bin/"
 cp tool/cosmocc/README.md "$OUTDIR/"
 cp tool/cosmocc/LICENSE.* "$OUTDIR/"
 
 mkdir -p "$OUTDIR/include/"
+mkdir -p "$OUTDIR/include/libc/integral/"
 cp -R libc/isystem/* "$OUTDIR/include/"
-cp -R libc/integral "$OUTDIR/include/libc/"
+cp libc/integral/* "$OUTDIR/include/libc/integral/"
 for x in $(cat o/cosmocc.h.txt); do
   mkdir -p "$OUTDIR/include/${x%/*}/"
   cp -f $x "$OUTDIR/include/${x%/*}/"
@@ -169,14 +255,37 @@ fetch() {
   else
     curl -LO $1
   fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    # can use system sha256sum
+    true
+  elif command -v shasum >/dev/null 2>&1; then
+    sha256sum() {
+      shasum -a 256 "$@"
+    }
+  elif command -v "$PWD/o/build/sha256sum" >/dev/null 2>&1; then
+    # should have been built by download-cosmocc.sh if a system
+    # sha256sum/shasum does not exist
+    sha256sum() {
+      "$PWD/o/build/sha256sum" "$@"
+    }
+  else
+    echo please install sha256sum >&2
+    exit 1
+  fi
+
+  filename=$(basename $1)
+  printf '%s\n' "$2 $filename" >$filename.sha256sum
+  sha256sum -c $filename.sha256sum || exit 1
+  rm -f $filename.sha256sum
 }
 
 OLD=$PWD
 cd "$OUTDIR/"
 if [ ! -x bin/x86_64-linux-cosmo-gcc ]; then
-  fetch https://github.com/ahgamut/superconfigure/releases/download/z0.0.54/aarch64-gcc.zip &
-  fetch https://github.com/ahgamut/superconfigure/releases/download/z0.0.54/x86_64-gcc.zip &
-  fetch https://github.com/ahgamut/superconfigure/releases/download/z0.0.54/llvm.zip &
+  fetch https://github.com/ahgamut/superconfigure/releases/download/z0.0.60/aarch64-gcc.zip 6a07f915ec0296cd33b3142e75c00ed1a7072c75d92c82a0c0b5f5df2cff0dd2 &
+  fetch https://github.com/ahgamut/superconfigure/releases/download/z0.0.60/x86_64-gcc.zip cbb1659c56a0a4f95a71f59f94693515000d3dd53f79a597acacd53cbad2c7d8 &
+  fetch https://github.com/ahgamut/superconfigure/releases/download/z0.0.60/llvm.zip d42c2e46204d4332975d2d7464c5df63c898c34f8d9d2b83c168c14705ca8edd &
   wait
   unzip aarch64-gcc.zip &
   unzip x86_64-gcc.zip &
@@ -185,56 +294,50 @@ if [ ! -x bin/x86_64-linux-cosmo-gcc ]; then
   rm -f aarch64-gcc.zip
   rm -f x86_64-gcc.zip
   rm -f llvm.zip
-  mv bin/clang-19 bin/cosmo-clang
+  mv bin/clang-19 libexec/clang  # use `cosmocc -mclang` instead
 fi
 rm -f bin/*-cpp
 rm -f bin/*-gcc-*
 rm -f bin/*-gprof
 rm -f bin/*-strings
-for arch in aarch64 x86_64; do
-  ln -sf $arch-linux-cosmo-addr2line bin/$arch-unknown-cosmo-addr2line
-  ln -sf $arch-linux-cosmo-ar bin/$arch-unknown-cosmo-ar
-  ln -sf $arch-linux-cosmo-as bin/$arch-unknown-cosmo-as
-  ln -sf $arch-linux-cosmo-c++filt bin/$arch-unknown-cosmo-c++filt
-  ln -sf $arch-linux-cosmo-g++ bin/$arch-linux-cosmo-c++
-  ln -sf $arch-linux-cosmo-gcc bin/$arch-linux-cosmo-cc
-  ln -sf $arch-linux-cosmo-gcc bin/$arch-linux-cosmo-cpp
-  ln -sf $arch-linux-cosmo-nm bin/$arch-unknown-cosmo-nm
-  ln -sf $arch-linux-cosmo-objcopy bin/$arch-unknown-cosmo-objcopy
-  ln -sf $arch-linux-cosmo-objdump bin/$arch-unknown-cosmo-objdump
-  ln -sf $arch-linux-cosmo-readelf bin/$arch-unknown-cosmo-readelf
-  ln -sf $arch-linux-cosmo-strip bin/$arch-unknown-cosmo-strip
-  # cmp -s libexec/gcc/$arch-linux-cosmo/$GCCVER/ld.bfd libexec/gcc/$arch-linux-cosmo/$GCCVER/ld
-  # ln -sf ld.bfd libexec/gcc/$arch-linux-cosmo/$GCCVER/ld
-  # cmp -s libexec/gcc/$arch-linux-cosmo/$GCCVER/ld.bfd bin/$arch-linux-cosmo-ld
-  # ln -sf ../libexec/gcc/$arch-linux-cosmo/$GCCVER/ld.bfd bin/$arch-linux-cosmo-ld
-  cmp -s libexec/gcc/$arch-linux-cosmo/$GCCVER/as bin/$arch-linux-cosmo-as
-  ln -sf ../libexec/gcc/$arch-linux-cosmo/$GCCVER/as bin/$arch-linux-cosmo-as
-  cmp -s libexec/gcc/$arch-linux-cosmo/$GCCVER/ld.bfd bin/$arch-linux-cosmo-ld.bfd
-  ln -sf ../libexec/gcc/$arch-linux-cosmo/$GCCVER/ld.bfd bin/$arch-linux-cosmo-ld.bfd
-done
 cd "$OLD"
+$DEDUPE -s "$OUTDIR/"
 
 for arch in $AMD64 $ARM64; do
   mkdir -p "$OUTDIR/$arch-linux-cosmo/lib/"
   mkdir -p "$OUTDIR/$arch-linux-cosmo/lib/dbg"
   mkdir -p "$OUTDIR/$arch-linux-cosmo/lib/tiny"
+  mkdir -p "$OUTDIR/$arch-linux-cosmo/lib/sysv"
   mkdir -p "$OUTDIR/$arch-linux-cosmo/lib/optlinux"
+  mkdir -p "$OUTDIR/$arch-linux-cosmo/lib/tinylinux"
 
   cp -f o/$arch/libc/crt/crt.o "$OUTDIR/$arch-linux-cosmo/lib/"
   cp -f o/$arch-dbg/libc/crt/crt.o "$OUTDIR/$arch-linux-cosmo/lib/dbg/"
   cp -f o/$arch-tiny/libc/crt/crt.o "$OUTDIR/$arch-linux-cosmo/lib/tiny/"
+  cp -f o/$arch-sysv/libc/crt/crt.o "$OUTDIR/$arch-linux-cosmo/lib/sysv/"
   cp -f o/$arch-optlinux/libc/crt/crt.o "$OUTDIR/$arch-linux-cosmo/lib/optlinux/"
+  cp -f o/$arch-tinylinux/libc/crt/crt.o "$OUTDIR/$arch-linux-cosmo/lib/tinylinux/"
+
+  cp -f o/$arch/libc/crt/crtfastmath.o "$OUTDIR/$arch-linux-cosmo/lib/"
+  cp -f o/$arch-dbg/libc/crt/crtfastmath.o "$OUTDIR/$arch-linux-cosmo/lib/dbg/"
+  cp -f o/$arch-tiny/libc/crt/crtfastmath.o "$OUTDIR/$arch-linux-cosmo/lib/tiny/"
+  cp -f o/$arch-sysv/libc/crt/crtfastmath.o "$OUTDIR/$arch-linux-cosmo/lib/sysv/"
+  cp -f o/$arch-optlinux/libc/crt/crtfastmath.o "$OUTDIR/$arch-linux-cosmo/lib/optlinux/"
+  cp -f o/$arch-tinylinux/libc/crt/crtfastmath.o "$OUTDIR/$arch-linux-cosmo/lib/tinylinux/"
 
   cp -f o/$arch/cosmopolitan.a "$OUTDIR/$arch-linux-cosmo/lib/libcosmo.a"
   cp -f o/$arch-dbg/cosmopolitan.a "$OUTDIR/$arch-linux-cosmo/lib/dbg/libcosmo.a"
   cp -f o/$arch-tiny/cosmopolitan.a "$OUTDIR/$arch-linux-cosmo/lib/tiny/libcosmo.a"
+  cp -f o/$arch-sysv/cosmopolitan.a "$OUTDIR/$arch-linux-cosmo/lib/sysv/libcosmo.a"
   cp -f o/$arch-optlinux/cosmopolitan.a "$OUTDIR/$arch-linux-cosmo/lib/optlinux/libcosmo.a"
+  cp -f o/$arch-tinylinux/cosmopolitan.a "$OUTDIR/$arch-linux-cosmo/lib/tinylinux/libcosmo.a"
 
   cp -f o/$arch/third_party/libcxx/libcxx.a "$OUTDIR/$arch-linux-cosmo/lib/"
   cp -f o/$arch-dbg/third_party/libcxx/libcxx.a "$OUTDIR/$arch-linux-cosmo/lib/dbg/"
   cp -f o/$arch-tiny/third_party/libcxx/libcxx.a "$OUTDIR/$arch-linux-cosmo/lib/tiny/"
+  cp -f o/$arch-sysv/third_party/libcxx/libcxx.a "$OUTDIR/$arch-linux-cosmo/lib/sysv/"
   cp -f o/$arch-optlinux/third_party/libcxx/libcxx.a "$OUTDIR/$arch-linux-cosmo/lib/optlinux/"
+  cp -f o/$arch-tinylinux/third_party/libcxx/libcxx.a "$OUTDIR/$arch-linux-cosmo/lib/tinylinux/"
 
   for lib in c dl gcc_s m crypt pthread resolv rt dl unwind gomp stdc++; do
     printf '\041\074\141\162\143\150\076\012' >"$OUTDIR/$arch-linux-cosmo/lib/lib$lib.a"
@@ -246,22 +349,30 @@ done
 cp -f o/$AMD64/ape/ape.o "$OUTDIR/x86_64-linux-cosmo/lib/"
 cp -f o/$AMD64-dbg/ape/ape.o "$OUTDIR/x86_64-linux-cosmo/lib/dbg/"
 cp -f o/$AMD64-tiny/ape/ape.o "$OUTDIR/x86_64-linux-cosmo/lib/tiny/"
+cp -f o/$AMD64-sysv/ape/ape.o "$OUTDIR/x86_64-linux-cosmo/lib/sysv/"
 cp -f o/$AMD64-optlinux/ape/ape.o "$OUTDIR/x86_64-linux-cosmo/lib/optlinux/"
+cp -f o/$AMD64-tinylinux/ape/ape.o "$OUTDIR/x86_64-linux-cosmo/lib/tinylinux/"
 
 cp -f o/$AMD64/ape/ape.lds "$OUTDIR/x86_64-linux-cosmo/lib/"
 cp -f o/$AMD64-dbg/ape/ape.lds "$OUTDIR/x86_64-linux-cosmo/lib/dbg/"
 cp -f o/$AMD64-tiny/ape/ape.lds "$OUTDIR/x86_64-linux-cosmo/lib/tiny/"
+cp -f o/$AMD64-sysv/ape/ape.lds "$OUTDIR/x86_64-linux-cosmo/lib/sysv/"
 cp -f o/$AMD64-optlinux/ape/ape.lds "$OUTDIR/x86_64-linux-cosmo/lib/optlinux/"
+cp -f o/$AMD64-tinylinux/ape/ape.lds "$OUTDIR/x86_64-linux-cosmo/lib/tinylinux/"
 
 cp -f o/$ARM64/ape/aarch64.lds "$OUTDIR/aarch64-linux-cosmo/lib/"
 cp -f o/$ARM64-dbg/ape/aarch64.lds "$OUTDIR/aarch64-linux-cosmo/lib/dbg/"
 cp -f o/$ARM64-tiny/ape/aarch64.lds "$OUTDIR/aarch64-linux-cosmo/lib/tiny/"
+cp -f o/$ARM64-sysv/ape/aarch64.lds "$OUTDIR/aarch64-linux-cosmo/lib/sysv/"
 cp -f o/$ARM64-optlinux/ape/aarch64.lds "$OUTDIR/aarch64-linux-cosmo/lib/optlinux/"
+cp -f o/$ARM64-tinylinux/ape/aarch64.lds "$OUTDIR/aarch64-linux-cosmo/lib/tinylinux/"
 
 cp -f o/$AMD64/ape/ape-no-modify-self.o "$OUTDIR/x86_64-linux-cosmo/lib/"
 cp -f o/$AMD64-dbg/ape/ape-no-modify-self.o "$OUTDIR/x86_64-linux-cosmo/lib/dbg/"
 cp -f o/$AMD64-tiny/ape/ape-no-modify-self.o "$OUTDIR/x86_64-linux-cosmo/lib/tiny/"
+cp -f o/$AMD64-sysv/ape/ape-no-modify-self.o "$OUTDIR/x86_64-linux-cosmo/lib/sysv/"
 cp -f o/$AMD64-optlinux/ape/ape-no-modify-self.o "$OUTDIR/x86_64-linux-cosmo/lib/optlinux/"
+cp -f o/$AMD64-tinylinux/ape/ape-no-modify-self.o "$OUTDIR/x86_64-linux-cosmo/lib/tinylinux/"
 
 cp -f ape/ape-m1.c "$OUTDIR/bin/"
 cp -af tool/cosmocc/bin/* "$OUTDIR/bin/"
@@ -271,8 +382,8 @@ cp -f o/$ARM64/ape/ape.elf "$OUTDIR/bin/ape-aarch64.elf"
 
 for x in assimilate march-native mktemper fixupobj zipcopy apelink pecheck mkdeps zipobj \
          ar chmod cocmd cp echo gzip objbincopy package rm touch mkdir compile sha256sum \
-         resymbol; do
-  ape $APELINK \
+         resymbol tlscc; do
+  $APE $APELINK \
     -l o/$AMD64/ape/ape.elf \
     -l o/$ARM64/ape/ape.elf \
     -M ape/ape-m1.c \
@@ -286,7 +397,7 @@ for x in ar chmod cp echo gzip package rm touch mkdir compile sha256sum; do
 done
 
 for x in make ctags; do
-  ape $APELINK \
+  $APE $APELINK \
     -l o/$AMD64/ape/ape.elf \
     -l o/$ARM64/ape/ape.elf \
     -M ape/ape-m1.c \

@@ -37,9 +37,8 @@
 #include "libc/limits.h"
 #include "libc/mem/gc.h"
 #include "libc/mem/mem.h"
-#include "libc/proc/proc.internal.h"
+#include "libc/proc/proc.h"
 #include "libc/runtime/internal.h"
-#include "libc/runtime/memtrack.internal.h"
 #include "libc/runtime/runtime.h"
 #include "libc/stdio/stdio.h"
 #include "libc/str/str.h"
@@ -262,8 +261,6 @@ void EmptySigHandler(int sig) {
 }
 
 TEST(posix_spawn, etxtbsy) {
-  if (IsWindows())
-    return;  // can't deliver signals between processes
   if (IsXnu())
     return;  // they don't appear impacted by this race condition
   if (IsNetbsd())

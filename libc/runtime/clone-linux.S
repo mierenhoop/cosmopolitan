@@ -26,54 +26,52 @@
 //	@param	rdx	x2	is ptid
 //	@param	rcx	x3	is ctid
 //	@param	r8	x4	is tls
-//	@param	r9	x5	is func(void*,int)→int
+//	@param	r9	x5	is func(void*)→int
 //	@param	8(rsp)	x6	is arg
 //	@return	tid of child on success, or -errno on error
 sys_clone_linux:
+	beg
+	pro
 #ifdef __x86_64__
-	push	%rbp
-	mov	%rsp,%rbp
-	push	%rbx
+	cpush	%rbx
 	mov	%rcx,%r10
 	mov	16(%rbp),%rbx
 	mov	$56,%eax		// __NR_clone
 	syscall
 	test	%rax,%rax
 	jz	2f
-0:	pop	%rbx
-	pop	%rbp
+0:	cpop	%rbx
+	epi
 	ret
-2:	xor	%ebp,%ebp		// child thread
+	end
+2:	beg
+	.cfi_undefined rip
+	xor	%ebp,%ebp		// child thread
 	mov	%rbx,%rdi		// arg
-	mov	%r10,%r15		// experiment
-	mov	(%r10),%esi		// tid
 	call	*%r9			// func(arg,tid)
 	xchg	%eax,%edi		// func(arg,tid) → exitcode
-	mov	(%r15),%eax		// experiment
-	test	%eax,%eax		// experiment
-	jz	1f			// experiment
 	mov	$60,%eax		// __NR_exit(exitcode)
 	syscall
-1:	hlt				// ctid was corrupted by program!
 #elif defined(__aarch64__)
-	stp	x29,x30,[sp,#-16]!
-	mov	x29,sp
 	mov	x8,x3			// swap x3 and x4
 	mov	x3,x4			// swap x3 and x4
 	mov	x4,x8			// swap x3 and x4
 	mov	x8,#220			// __NR_clone
 	svc	#0
 	cbz	x0,2f
-	ldp	x29,x30,[sp],#16
+	epi
 	ret
-2:	mov	x29,#0			// wipe backtrace
+	end
+2:	beg
+	.cfi_undefined x30
+	mov	x29,#0			// wipe backtrace
 	mov	x28,x3			// set cosmo tls
 	mov	x0,x6			// child thread
-	ldr	w1,[x4]			// arg2 = *ctid
 	blr	x5
 	mov	x8,#93			// __NR_exit
 	svc	#0
 #else
 #error "unsupported architecture"
 #endif
+	end
 	.endfn	sys_clone_linux,globl,hidden

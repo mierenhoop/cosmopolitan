@@ -17,22 +17,18 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/intrin/cxaatexit.h"
+#include "libc/runtime/runtime.h"
+#include "libc/thread/posixthread.internal.h"
 #include "libc/thread/thread.h"
 
-static pthread_mutex_t __cxa_lock_obj;
-
-void __cxa_wipe(void) {
-  pthread_mutex_init(&__cxa_lock_obj, 0);
-}
+alignas(64) pthread_mutex_t __cxa_lock_obj = PTHREAD_MUTEX_INITIALIZER;
 
 void __cxa_lock(void) {
-  pthread_mutex_lock(&__cxa_lock_obj);
+  if (__isthreaded >= 1)
+    pthread_mutex_lock(&__cxa_lock_obj);
 }
 
 void __cxa_unlock(void) {
-  pthread_mutex_unlock(&__cxa_lock_obj);
-}
-
-__attribute__((__constructor__(60))) static textstartup void __cxa_init() {
-  pthread_atfork(__cxa_lock, __cxa_unlock, __cxa_wipe);
+  if (__isthreaded >= 1)
+    pthread_mutex_unlock(&__cxa_lock_obj);
 }

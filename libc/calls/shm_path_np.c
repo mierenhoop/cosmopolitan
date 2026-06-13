@@ -17,9 +17,22 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/calls.h"
+#include "libc/calls/struct/stat.h"
 #include "libc/dce.h"
+#include "libc/errno.h"
 #include "libc/str/blake2.h"
 #include "libc/str/str.h"
+#include "libc/sysv/consts/at.h"
+#include "libc/sysv/consts/s.h"
+
+static bool isdirectory(const char *path) {
+  int e = errno;
+  struct stat st;
+  if (!fstatat(AT_FDCWD, path, &st, AT_SYMLINK_NOFOLLOW))
+    return S_ISDIR(st.st_mode);
+  errno = e;
+  return false;
+}
 
 /**
  * Returns filesystem pathname of named semaphore.
@@ -35,9 +48,8 @@ void shm_path_np(const char *name, char buf[hasatleast 78]) {
   const char *a;
   uint8_t digest[BLAKE2B256_DIGEST_LENGTH];
   a = "/tmp/", n = 5;
-  if (IsLinux() && isdirectory("/dev/shm")) {
+  if (IsLinux() && isdirectory("/dev/shm"))
     a = "/dev/shm/", n = 9;
-  }
   BLAKE2B256(name, strlen(name), digest);
   p = mempcpy(buf, a, n);
   p = hexpcpy(p, digest, BLAKE2B256_DIGEST_LENGTH);

@@ -29,15 +29,13 @@
 #include "libc/sysv/errfuns.h"
 
 /**
- * Synchronize memory mapping changes to disk.
- *
- * Without this, there's no guarantee memory is written back to disk.
- * Particularly on RHEL5, OpenBSD, and Windows NT.
+ * Synchronizes memory mapping.
  *
  * @param addr needs to be 4096-byte page aligned
  * @param flags needs MS_ASYNC or MS_SYNC and can have MS_INVALIDATE
  * @return 0 on success or -1 w/ errno
  * @raise ECANCELED if thread was cancelled in masked mode
+ * @raise EDEADLK if called from signal handler interrupting mmap()
  * @raise EINTR if we needed to block and a signal was delivered instead
  * @raise EINVAL if `MS_SYNC` and `MS_ASYNC` were both specified
  * @raise EINVAL if unknown `flags` were passed
@@ -67,23 +65,19 @@ int msync(void *addr, size_t size, int flags) {
   } else {
     sysflags = MS_ASYNC;
   }
-  if (flags & MS_INVALIDATE) {
+  if (flags & MS_INVALIDATE)
     sysflags |= MS_INVALIDATE;
-  }
 
   // FreeBSD's manual says "The flags argument was both MS_ASYNC and
   // MS_INVALIDATE. Only one of these flags is allowed." which makes
   // following the POSIX recommendation somewhat difficult.
-  if (IsFreebsd()) {
-    if (sysflags == (MS_ASYNC | MS_INVALIDATE)) {
+  if (IsFreebsd())
+    if (sysflags == (MS_ASYNC | MS_INVALIDATE))
       sysflags = MS_INVALIDATE;
-    }
-  }
 
   // FreeBSD specifies MS_SYNC as 0 so we shift the Cosmo constants
-  if (IsFreebsd()) {
+  if (IsFreebsd())
     sysflags >>= 1;
-  }
 
   BEGIN_CANCELATION_POINT;
   if (!IsWindows()) {

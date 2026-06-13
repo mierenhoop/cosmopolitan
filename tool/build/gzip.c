@@ -71,9 +71,7 @@ const char *prog;
 char databuf[32768];
 char pathbuf[PATH_MAX];
 
-#include "libc/mem/tinymalloc.inc"
-
-wontreturn void PrintUsage(int rc, FILE *f) {
+[[noreturn]] void PrintUsage(int rc, FILE *f) {
   fputs("usage: ", f);
   fputs(prog, f);
   fputs(USAGE, f);

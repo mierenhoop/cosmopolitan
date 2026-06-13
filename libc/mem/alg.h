@@ -4,19 +4,17 @@ COSMOPOLITAN_C_START_
 
 void *bsearch(const void *, const void *, size_t, size_t,
               int (*)(const void *, const void *)) paramsnonnull() nosideeffect;
-void qsort3(void *, size_t, size_t, int (*)(const void *, const void *))
-    paramsnonnull();
+
 void qsort(void *, size_t, size_t, int (*)(const void *, const void *))
     paramsnonnull();
 void qsort_r(void *, size_t, size_t,
              int (*)(const void *, const void *, void *), void *)
     paramsnonnull((1, 4));
-void smoothsort(void *, size_t, size_t, int (*)(const void *, const void *));
-void smoothsort_r(void *, size_t, size_t,
-                  int (*)(const void *, const void *, void *), void *);
+
 int heapsort(void *, size_t, size_t, int (*)(const void *, const void *));
 int heapsort_r(void *, size_t, size_t,
                int (*)(const void *, const void *, void *), void *);
+
 int mergesort(void *, size_t, size_t, int (*)(const void *, const void *));
 int mergesort_r(void *, size_t, size_t,
                 int (*)(const void *, const void *, void *), void *);

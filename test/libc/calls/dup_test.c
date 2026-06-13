@@ -28,7 +28,6 @@
 #include "libc/stdio/stdio.h"
 #include "libc/str/str.h"
 #include "libc/sysv/consts/f.h"
-#include "libc/sysv/consts/fd.h"
 #include "libc/sysv/consts/o.h"
 #include "libc/testlib/testlib.h"
 #include "libc/x/xspawn.h"
@@ -94,7 +93,6 @@ TEST(dup2, zipossrc) {
   ASSERT_SYS(0, 0, close(3));
 }
 
-#ifdef __x86_64__
 TEST(dup, clearsCloexecFlag) {
   static bool once;
   int ws;
@@ -112,4 +110,3 @@ TEST(dup, clearsCloexecFlag) {
   ASSERT_EQ(72 << 8, ws);
   ASSERT_SYS(0, 0, close(3));
 }
-#endif

@@ -30,6 +30,7 @@
 #include "libc/dce.h"
 #include "libc/errno.h"
 #include "libc/intrin/asmflag.h"
+#include "libc/intrin/kprintf.h"
 #include "libc/intrin/strace.h"
 #include "libc/intrin/weaken.h"
 #include "libc/macros.h"
@@ -49,8 +50,6 @@
 #include "libc/sysv/consts/sig.h"
 #include "libc/sysv/errfuns.h"
 #include "libc/thread/thread.h"
-
-__static_yoink("rdrand_init");
 
 int sys_getentropy(void *, size_t) asm("sys_getrandom");
 ssize_t sys_getrandom_metal(char *, size_t, int);
@@ -114,7 +113,8 @@ static ssize_t GetDevUrandom(char *p, size_t n, unsigned f) {
 ssize_t __getrandom(void *p, size_t n, unsigned f) {
   ssize_t rc;
   if (IsWindows()) {
-    rc = ProcessPrng(p, n) ? n : __winerr();
+    ProcessPrng(p, n);  // never fails
+    rc = n;
   } else if (have_getrandom) {
     if (IsXnu() || IsOpenbsd()) {
       rc = GetRandomBsd(p, n, GetRandomEntropy);
@@ -184,16 +184,14 @@ ssize_t __getrandom(void *p, size_t n, unsigned f) {
  * @raise EFAULT if the `n` bytes at `p` aren't valid memory
  * @raise EINTR if we needed to block and a signal was delivered instead
  * @cancelationpoint
- * @asyncsignalsafe
  * @restartable
- * @vforksafe
  */
 ssize_t getrandom(void *p, size_t n, unsigned f) {
   ssize_t rc;
-  if ((!p && n)) {
-    rc = efault();
-  } else if (f & ~(GRND_RANDOM | GRND_NONBLOCK)) {
+  if (f & ~(GRND_RANDOM | GRND_NONBLOCK)) {
     rc = einval();
+  } else if (n && kisdangerous(p)) {
+    rc = efault();
   } else {
     rc = __getrandom(p, n, f);
   }

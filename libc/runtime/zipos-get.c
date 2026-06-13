@@ -63,11 +63,9 @@ static void __zipos_dismiss(uint8_t *map, const uint8_t *cdir, long pg) {
   }
 
   // unmap the executable portion beneath the local files
-  if (!IsWindows()) {
-    mo = ROUNDDOWN(lo, __gransize);
-    if (mo)
-      munmap(map, mo);
-  }
+  mo = ROUNDDOWN(lo, __gransize);
+  if (mo && !IsWindows())
+    munmap(map, mo);
 }
 
 static int __zipos_compare_names(const void *a, const void *b, void *c) {
@@ -94,10 +92,8 @@ static void __zipos_generate_index(struct Zipos *zipos) {
   for (i = 0, c = GetZipCdirOffset(zipos->cdir); i < zipos->records;
        ++i, c += ZIP_CFILE_HDRSIZE(zipos->map + c))
     zipos->index[i] = c;
-  // smoothsort() isn't the fastest algorithm, but it guarantees
-  // o(nlogn) won't smash the stack and doesn't depend on malloc
-  smoothsort_r(zipos->index, zipos->records, sizeof(size_t),
-               __zipos_compare_names, zipos);
+  qsort_r(zipos->index, zipos->records, sizeof(size_t), __zipos_compare_names,
+          zipos);
 }
 
 static void __zipos_init(void) {

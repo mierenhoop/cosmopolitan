@@ -17,6 +17,7 @@
 │ PERFORMANCE OF THIS SOFTWARE.                                                │
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/calls.h"
+#include "libc/calls/state.internal.h"
 #include "libc/calls/syscall-sysv.internal.h"
 #include "libc/dce.h"
 #include "libc/errno.h"
@@ -34,6 +35,7 @@
 #include "libc/str/str.h"
 #include "libc/testlib/aspect.internal.h"
 #include "libc/testlib/testlib.h"
+#include "libc/thread/posixthread.internal.h"
 #include "libc/thread/thread.h"
 #include "libc/x/x.h"
 
@@ -52,7 +54,8 @@ void testlib_finish(void) {
 void testlib_error_enter(const char *file, const char *func) {
   ftrace_enabled(-1);
   strace_enabled(-1);
-  pthread_mutex_lock(&testlib_error_lock);
+  if (!__spawned)
+    pthread_mutex_lock(&testlib_error_lock);
   if (!IsWindows())
     sys_getpid(); /* make strace easier to read */
   if (!IsWindows())
@@ -72,7 +75,7 @@ void testlib_error_leave(void) {
 
 wontreturn void testlib_abort(void) {
   testlib_finish();
-  _Exit(MAX(1, MIN(255, g_testlib_failed)));
+  exit(MAX(1, MIN(255, g_testlib_failed)));
 }
 
 /**

@@ -12,6 +12,7 @@
 #include "libc/nt/files.h"
 #include "libc/nt/ipc.h"
 #include "libc/nt/memory.h"
+#include "libc/nt/nls.h"
 #include "libc/nt/paint.h"
 #include "libc/nt/process.h"
 #include "libc/nt/registry.h"
@@ -662,7 +663,7 @@
 #define FILE_SHARE_DELETE kNtFileShareDelete
 
 #include "libc/nt/runtime.h"
-#define INVALID_HANDLE_VALUE kNtInvalidHandleValue
+#define INVALID_HANDLE_VALUE -1l
 #define STD_INPUT_HANDLE kNtStdInputHandle
 #define STD_OUTPUT_HANDLE kNtStdOutputHandle
 #define STD_ERROR_HANDLE kNtStdErrorHandle
@@ -1365,7 +1366,6 @@
 #define SOCKET_ERROR -1
 #define WSA_INVALID_EVENT -1L
 
-#define WAIT_FAILED -1U
 #define STATUS_WAIT_0 0
 #define WAIT_FAILED 0xFFFFFFFFu
 #define WAIT_OBJECT_0 0
@@ -1420,6 +1420,15 @@
 #define HKEY_CURRENT_CONFIG kNtHkeyCurrentConfig
 #define HKEY_DYN_DATA kNtHkeyDynData
 #define HKEY_CURRENT_USER_LOCAL_SETTINGS kNtHkeyCurrentUserLocalSettings
+#define KEY_QUERY_VALUE kNtKeyQueryValue
+#define KEY_SET_VALUE kNtKeySetValue
+#define KEY_CREATE_SUB_KEY kNtKeyCreateSubKey
+#define KEY_ENUMERATE_SUB_KEYS kNtKeyEnumerateSubKeys
+#define KEY_NOTIFY kNtKeyNotify
+#define KEY_CREATE_LINK kNtKeyCreateLink
+#define KEY_WOW64_32KEY kNtWow6432Key
+#define KEY_WOW64_64KEY kNtWow6464Key
+#define KEY_WOW64_RES kNtWow64Res
 #define KEY_READ kNtKeyRead
 #define KEY_WRITE kNtKeyWrite
 #define KEY_EXECUTE kNtKeyExecute
@@ -4117,15 +4126,7 @@
 #define E_ABORT ((HRESULT)0x80004004)
 #define E_FAIL ((HRESULT)0x80004005)
 #define E_ACCESSDENIED ((HRESULT)0x80070005)
-#define E_NOTIMPL ((HRESULT)0x80000001)
-#define E_OUTOFMEMORY ((HRESULT)0x80000002)
-#define E_INVALIDARG ((HRESULT)0x80000003)
-#define E_NOINTERFACE ((HRESULT)0x80000004)
-#define E_POINTER ((HRESULT)0x80000005)
-#define E_HANDLE ((HRESULT)0x80000006)
-#define E_ABORT ((HRESULT)0x80000007)
-#define E_FAIL ((HRESULT)0x80000008)
-#define E_ACCESSDENIED ((HRESULT)0x80000009)
+
 #define E_PENDING ((HRESULT)0x8000000A)
 #define E_BOUNDS ((HRESULT)0x8000000B)
 #define E_CHANGED_STATE ((HRESULT)0x8000000C)
@@ -4291,6 +4292,13 @@
 #define MAKE_HRESULT(sev,fac,code) ((HRESULT) (((unsigned long)(sev)<<31) | ((unsigned long)(fac)<<16) | ((unsigned long)(code))) )
 #define MAKE_SCODE(sev,fac,code) ((SCODE) (((unsigned long)(sev)<<31) | ((unsigned long)(fac)<<16) | ((unsigned long)(code))) )
 
+#define CP_ACP        0
+#define CP_OEMCP      1
+#define CP_MACCP      2
+#define CP_THREAD_ACP 3
+#define CP_SYMBOL     42
+
+#define CP_UTF7 65000
 #define CP_UTF8 65001
 
 #endif /* COSMOPOLITAN_LIBC_COMPAT_INCLUDE_WINDOWS_H_ */

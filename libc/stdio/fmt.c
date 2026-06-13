@@ -78,7 +78,7 @@
 #define FLAGS_ISSIGNED  0x40
 #define FLAGS_NOQUOTE   0x80
 #define FLAGS_REPR      0x100
-#define FLAGS_QUOTE     FLAGS_SPACE
+#define FLAGS_QUOTE     0x200
 #define FLAGS_GROUPING  FLAGS_NOQUOTE
 
 #define __FMT_PUT(C)              \
@@ -565,12 +565,12 @@ static int __fmt_stoa(int out(const char *, void *, size_t), void *arg,
 static void __fmt_dfpbits(union U *u, struct FPBits *b) {
   int ex, i;
   b->fpi = kFpiDbl;
-  // Uncomment this if needed in the future - we currently do not need it, as
-  // the only reason we need it in __fmt_ldfpbits is because gdtoa reads
-  // fpi.rounding to determine rounding (which dtoa does not need as it directly
-  // reads FLT_ROUNDS)
-  // if (FLT_ROUNDS != -1)
-  //   b->fpi.rounding = FLT_ROUNDS;
+
+  // dtoa doesn't need this, unlike gdtoa, but we use it for __fmt_bround
+  i = FLT_ROUNDS;
+  if (i != -1)
+    b->fpi.rounding = i;
+
   b->sign = u->ui[1] & 0x80000000L;
   b->bits[1] = u->ui[1] & 0xfffff;
   b->bits[0] = u->ui[0];
@@ -616,10 +616,14 @@ static void __fmt_ldfpbits(union U *u, struct FPBits *b) {
 #error "unsupported architecture"
 #endif
   b->fpi = kFpiLdbl;
+
   // gdtoa doesn't check for FLT_ROUNDS but for fpi.rounding (which has the
   // same valid values as FLT_ROUNDS), so handle this here
-  if (FLT_ROUNDS != -1)
-    b->fpi.rounding = FLT_ROUNDS;
+  // (we also use this in __fmt_bround now)
+  i = FLT_ROUNDS;
+  if (i != -1)
+    b->fpi.rounding = i;
+
   b->sign = sex & 0x8000;
   if ((ex = sex & 0x7fff) != 0) {
     if (ex != 0x7fff) {
@@ -690,26 +694,47 @@ static int __fmt_fpiprec(struct FPBits *b) {
 // prec1 = incoming precision (after ".")
 static int __fmt_bround(struct FPBits *b, int prec, int prec1) {
   uint32_t *bits, t;
-  int i, inc, j, k, m, n;
+  int i, j, k, m, n;
+  bool inc = false;
   m = prec1 - prec;
   bits = b->bits;
-  inc = 0;
   k = m - 1;
+
+  // The first two ifs here handle cases where rounding is simple, i.e. where we
+  // always know in which direction we must round because of the current
+  // rounding mode (note that if the correct value for inc is `false` then it
+  // doesn't need to be set as we have already done so above)
+  // They use the FLT_ROUNDS value, which are the same as gdtoa's FPI_Round_*
+  // enum values
+  if (b->fpi.rounding == FPI_Round_zero ||
+      (b->fpi.rounding == FPI_Round_up && b->sign) ||
+      (b->fpi.rounding == FPI_Round_down && !b->sign))
+    goto have_inc;
+  if ((b->fpi.rounding == FPI_Round_up && !b->sign) ||
+      (b->fpi.rounding == FPI_Round_down && b->sign))
+    goto inc_true;
+
+  // Rounding to nearest, ties to even
   if ((t = bits[k >> 3] >> (j = (k & 7) * 4)) & 8) {
     if (t & 7)
-      goto inc1;
-    if (j && bits[k >> 3] << (32 - j))
-      goto inc1;
+      goto inc_true;
+    // ((1 << (j * 4)) - 1) will mask appropriately for the lower bits
+    if ((bits[k >> 3] & ((1 << (j * 4)) - 1)) != 0)
+      goto inc_true;
+    // If exactly halfway and all lower bits are zero (tie), round to even
+    if ((bits[k >> 3] >> (j + 1) * 4) & 1)
+      goto inc_true;
     while (k >= 8) {
       k -= 8;
       if (bits[k >> 3]) {
-      inc1:
-        inc = 1;
-        goto haveinc;
+      inc_true:
+        inc = true;
+        goto have_inc;
       }
     }
   }
-haveinc:
+
+have_inc:
   b->ex += m * 4;
   i = m >> 3;
   k = prec1 >> 3;
@@ -733,7 +758,12 @@ haveinc:
       donothing;
     if (j > k) {
     onebit:
-      bits[0] = 1;
+      // We use 0x10 instead of 1 here to ensure that the digit before the
+      // decimal-point is non-0 (the C standard mandates this, i.e. considers
+      // that printing 0x0.1p+5 is illegal where 0x1.0p+1 is even though both
+      // evaluate to the same value because the first has 0 as the digit before
+      // the decimal-point character)
+      bits[0] = 0x10;
       b->ex += 4 * prec;
       return 1;
     }
@@ -834,7 +864,7 @@ static int __fmt_noop(const char *, void *, size_t) {
  * @asyncsignalsafe if floating point isn't used
  * @vforksafe if floating point isn't used
  */
-int __fmt(void *fn, void *arg, const char *format, va_list va, int *wrote) {
+int __fmt(void *fn, void *arg, const char *format, va_list va, size_t *wrote) {
   long ld;
   void *p;
   double x;
@@ -1060,9 +1090,10 @@ int __fmt(void *fn, void *arg, const char *format, va_list va, int *wrote) {
       case 'x':
         log2base = 4;
         goto FormatNumber;
+      case 'B':
       case 'b':
         log2base = 1;
-        alphabet = "0123456789abcdefpb";
+        alphabet = (d == 'b' ? "0123456789abcdefpb" : "0123456789ABCDEFPB");
         goto FormatNumber;
       case 'o':
         log2base = 3;
@@ -1473,9 +1504,13 @@ int __fmt(void *fn, void *arg, const char *format, va_list va, int *wrote) {
         i1 = prec1 & 7;
         k = prec1 >> 3;
         __FMT_PUT(alphabet[(fpb.bits[k] >> 4 * i1) & 0xf]);
-        if (prec1 > 0 || prec > 0) {
+
+        // decimal-point character appears if the precision isn't 0
+        // or the # flag is specified
+        if (prec1 > 0 || prec > 0 || (flags & FLAGS_HASH)) {
           __FMT_PUT('.');
         }
+
         while (prec1 > 0) {
           if (--i1 < 0) {
             if (--k < 0)

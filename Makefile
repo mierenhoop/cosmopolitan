@@ -77,7 +77,8 @@ COMMA := ,
 PWD := $(shell pwd)
 
 # detect wsl2 running cosmopolitan binaries on the host by checking whether:
-# - user ran build/bootstrap/make, in which case make's working directory is in wsl
+# - user ran .cosmocc/current/bin/make, in which case make's working directory
+#   is in wsl
 # - user ran make, in which case cocmd's working directory is in wsl
 ifneq ($(findstring //wsl.localhost/,$(CURDIR) $(PWD)),)
 $(warning wsl2 interop is enabled)
@@ -89,7 +90,7 @@ UNAME_S := $(shell uname -s)
 
 # apple still distributes a 17 year old version of gnu make
 ifeq ($(MAKE_VERSION), 3.81)
-$(error please use build/bootstrap/make)
+$(error please use https://cosmo.zip/pub/cosmos/bin/make)
 endif
 
 LC_ALL = C
@@ -109,11 +110,11 @@ ECHO = $(BOOTSTRAP)/echo.ape
 CHMOD = $(BOOTSTRAP)/chmod.ape
 TOUCH = $(BOOTSTRAP)/touch.ape
 PKG = $(BOOTSTRAP)/package.ape
-MKDEPS = $(BOOTSTRAP)/mkdeps
+MKDEPS = build/bootstrap/mkdeps
 ZIPOBJ = $(BOOTSTRAP)/zipobj
 ZIPCOPY = $(BOOTSTRAP)/zipcopy
 PECHECK = $(BOOTSTRAP)/pecheck
-FIXUPOBJ = $(BOOTSTRAP)/fixupobj
+FIXUPOBJ = build/bootstrap/fixupobj
 OBJBINCOPY = $(BOOTSTRAP)/objbincopy
 MKDIR = $(BOOTSTRAP)/mkdir.ape -p
 COMPILE = $(BOOTSTRAP)/compile.ape -V9 -M2048m -P8192 $(QUOTA)
@@ -135,7 +136,7 @@ ARCH = aarch64
 HOSTS ?= pi pi5 studio freebsdarm
 else
 ARCH = x86_64
-HOSTS ?= freebsd rhel7 xnu openbsd netbsd win10
+HOSTS ?= freebsd xnu win10 luna netbsd
 endif
 
 ZIPOBJ_FLAGS += -a$(ARCH)
@@ -147,16 +148,20 @@ export MODE
 export SOURCE_DATE_EPOCH
 export TMPDIR
 
-COSMOCC = .cosmocc/3.8.0
+COSMOCC = .cosmocc/3.9.2
 BOOTSTRAP = $(COSMOCC)/bin
 TOOLCHAIN = $(COSMOCC)/bin/$(ARCH)-linux-cosmo-
-DOWNLOAD := $(shell build/download-cosmocc.sh $(COSMOCC) 3.8.0 813c6b2f95062d2e0a845307a79505424cb98cb038e8013334f8a22e3b92a474)
+DOWNLOAD := $(shell build/download-cosmocc.sh $(COSMOCC) 3.9.2 f4ff13af65fcd309f3f1cfd04275996fb7f72a4897726628a8c9cf732e850193)
 
 IGNORE := $(shell $(MKDIR) $(TMPDIR))
 
+ifeq ($(ARCH), x86_64)
+TLSCC = build/bootstrap/tlscc
+endif
+
 AS = $(TOOLCHAIN)as
-CC = $(TOOLCHAIN)gcc
-CXX = $(TOOLCHAIN)g++
+CC = $(TLSCC) $(TOOLCHAIN)gcc
+CXX = $(TLSCC) $(TOOLCHAIN)g++
 CXXFILT = $(TOOLCHAIN)c++filt
 LD = $(TOOLCHAIN)ld.bfd
 NM = $(TOOLCHAIN)nm
@@ -189,39 +194,42 @@ o/$(MODE):			\
 o/$(MODE)/: o/$(MODE)
 o/$(MODE)/.: o/$(MODE)
 
-# check if we're using o//third_party/make/make
-# we added sandboxing to guarantee cosmo's makefile is hermetic
-# it also shaves away 200ms of startup latency with native $(uniq)
-ifneq ($(LANDLOCKMAKE_VERSION),)
-ifeq ($(UNAME_S),Linux)
-ifeq ($(wildcard /usr/bin/ape),)
-$(warning please run ape/apeinstall.sh if you intend to use landlock make)
-$(shell sleep .5)
-endif
-endif
 ifneq ($(TOOLCHAIN),)
-.STRICT = 1
-endif
-endif
-
-.PLEDGE += stdio rpath wpath cpath fattr proc
-.UNVEIL +=					\
-	libc/integral				\
-	libc/stdbool.h				\
-	rwc:/dev/shm				\
+# If you're using Cosmopolitan Make as your `make` command (you can
+# build it by saying `make o//third_party/make/make`) then these
+# variables will activate its pledge() and unveil() sandboxing
+# functionality when running on Linux. When cross-compiling, it's
+# important that your qemu binaries be statically compiled. See
+# third_party/qemu/ for our prebuilt qemu-aarch64 binary. Yes
+# binfmt_misc has to be configured to use it on foreign bins.
+.SANDBOXED = 1
+.PLEDGE := stdio rpath wpath cpath fattr proc
+.UNVEIL :=					\
+	rwcx:o					\
+	rwcx:/tmp				\
+	rwcx:$(TMPDIR)				\
+	rx:/usr/bin/ape				\
 	rx:.cosmocc				\
 	rx:build/bootstrap			\
-	r:build/portcosmo.h			\
+	libc/integral				\
+	rwc:/dev/shm				\
 	/proc/stat				\
 	rw:/dev/null				\
 	rw:/dev/full				\
-	w:o/stack.log				\
 	/etc/hosts				\
+	/etc/ape.trust				\
+	/etc/ape.revoke				\
+	/etc/ssh/ssh_host_ed25519_key.pub	\
 	~/.runit.psk				\
+	~/.ssh/authorized_keys			\
+	~/.ssh/id_ed25519.pub			\
+	~/.ape.trust				\
+	~/.ape.revoke				\
 	/proc/self/status			\
 	rx:/usr/bin/qemu-aarch64		\
-	rx:o/third_party/qemu/qemu-aarch64	\
-	/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+	rx:/usr/bin/qemu-x86_64			\
+	rx:/usr/libexec/qemu-binfmt/aarch64-binfmt-P
+endif
 
 PKGS =
 
@@ -256,8 +264,10 @@ include third_party/gdtoa/BUILD.mk		# ├──DYNAMIC RUNTIME
 include third_party/nsync/mem/BUILD.mk		# │  You can now use stdio
 include libc/proc/BUILD.mk			# │  You can now use threads
 include libc/dlopen/BUILD.mk			# │  You can now use processes
-include libc/thread/BUILD.mk			# │  You can finally call malloc()
+include third_party/libunwind/BUILD.mk		# |  You can finally call malloc()
+include libc/thread/BUILD.mk			# │
 include third_party/zlib/BUILD.mk		# │
+include third_party/haclstar/BUILD.mk		# │
 include libc/stdio/BUILD.mk			# │
 include tool/hello/BUILD.mk			# │
 include third_party/tz/BUILD.mk			# │
@@ -274,6 +284,10 @@ include libc/BUILD.mk				#─┘
 include libc/sock/BUILD.mk			#─┐
 include net/http/BUILD.mk			# ├──ONLINE RUNTIME
 include third_party/musl/BUILD.mk		# │  You can communicate with the network
+include third_party/regex/BUILD.mk		# │
+include third_party/tr/BUILD.mk			# │
+include third_party/sed/BUILD.mk		# │
+include libc/system/BUILD.mk			# │
 include libc/x/BUILD.mk				# │
 include dsp/scale/BUILD.mk			# │
 include dsp/mpeg/BUILD.mk			# │
@@ -284,23 +298,25 @@ include third_party/stb/BUILD.mk		# │
 include third_party/mbedtls/BUILD.mk		# │
 include third_party/ncurses/BUILD.mk		# │
 include third_party/readline/BUILD.mk		# │
-include third_party/libunwind/BUILD.mk		# |
 include third_party/libcxxabi/BUILD.mk		# |
+include third_party/miniaudio/BUILD.mk		# |
 include third_party/double-conversion/BUILD.mk	# │
+include dsp/prog/BUILD.mk			# │
 include ctl/BUILD.mk				# │
 include third_party/libcxx/BUILD.mk		# │
 include third_party/openmp/BUILD.mk		# │
 include third_party/pcre/BUILD.mk		# │
 include third_party/less/BUILD.mk		# │
-include net/https/BUILD.mk			# │
-include third_party/regex/BUILD.mk		#─┘
+include net/https/BUILD.mk			#─┘
 include third_party/tidy/BUILD.mk
 include third_party/BUILD.mk
 include third_party/nsync/testing/BUILD.mk
 include libc/testlib/BUILD.mk
 include tool/viz/lib/BUILD.mk
 include tool/args/BUILD.mk
+include tool/chat/BUILD.mk
 include test/math/BUILD.mk
+include test/c11/BUILD.mk
 include test/posix/BUILD.mk
 include test/ctl/BUILD.mk
 include test/libcxx/BUILD.mk
@@ -309,11 +325,11 @@ include third_party/linenoise/BUILD.mk
 include third_party/maxmind/BUILD.mk
 include net/finger/BUILD.mk
 include third_party/double-conversion/test/BUILD.mk
+include third_party/dash/BUILD.mk
+include third_party/netcat/BUILD.mk
 include third_party/lua/BUILD.mk
 include third_party/tree/BUILD.mk
 include third_party/zstd/BUILD.mk
-include third_party/tr/BUILD.mk
-include third_party/sed/BUILD.mk
 include third_party/awk/BUILD.mk
 include third_party/hiredis/BUILD.mk
 include third_party/make/BUILD.mk
@@ -366,6 +382,7 @@ include test/libc/fmt/BUILD.mk
 include test/libc/time/BUILD.mk
 include test/libc/proc/BUILD.mk
 include test/libc/stdio/BUILD.mk
+include test/libc/system/BUILD.mk
 include test/libc/BUILD.mk
 include test/net/http/BUILD.mk
 include test/net/https/BUILD.mk
@@ -410,86 +427,87 @@ o/$(MODE)/hdrs.txt: o/$(MODE)/.x $(MAKEFILES) $(call uniq,$(foreach x,$(HDRS) $(
 o/$(MODE)/incs.txt: o/$(MODE)/.x $(MAKEFILES) $(call uniq,$(foreach x,$(INCS) $(INCS),$(dir $(x)))) $(INCS) $(INCS)
 	$(file >$@,$(INCS))
 o/$(MODE)/depend: o/$(MODE)/.x o/$(MODE)/srcs.txt o/$(MODE)/hdrs.txt o/$(MODE)/incs.txt $(SRCS) $(HDRS) $(INCS)
-	$(COMPILE) -AMKDEPS -L320 $(MKDEPS) -o $@ -s -r o/$(MODE)/ @o/$(MODE)/srcs.txt @o/$(MODE)/hdrs.txt @o/$(MODE)/incs.txt
+	$(COMPILE) -AMKDEPS -L320 $(MKDEPS) -o $@ -s -r o/$(MODE)/ -S c++:third_party/libcxx/ -S libc/isystem/ @o/$(MODE)/srcs.txt @o/$(MODE)/hdrs.txt @o/$(MODE)/incs.txt
 
 o/$(MODE)/srcs-old.txt: o/$(MODE)/.x $(MAKEFILES) $(call uniq,$(foreach x,$(SRCS),$(dir $(x))))
 	$(file >$@) $(foreach x,$(SRCS),$(file >>$@,$(x)))
 o/$(MODE)/hdrs-old.txt: o/$(MODE)/.x $(MAKEFILES) $(call uniq,$(foreach x,$(HDRS) $(INCS),$(dir $(x))))
 	$(file >$@) $(foreach x,$(HDRS) $(INCS),$(file >>$@,$(x)))
 
-TAGS: private .UNSANDBOXED = 1
+TAGS: private .SANDBOXED = 0
 TAGS:	o/$(MODE)/srcs-old.txt $(SRCS) #o/$(MODE)/third_party/ctags/ctags
 	@$(RM) $@
 	@o/$(MODE)/third_party/ctags/ctags $(TAGSFLAGS) -L $< -o $@
 
-HTAGS: private .UNSANDBOXED = 1
+HTAGS: private .SANDBOXED = 0
 HTAGS:	o/$(MODE)/hdrs-old.txt $(filter-out third_party/libcxx/%,$(HDRS)) #o/$(MODE)/third_party/ctags/ctags
 	@$(RM) $@
 	@build/htags o/$(MODE)/third_party/ctags/ctags -L $< -o $@
 
-loc: private .UNSANDBOXED = 1
+loc: private .SANDBOXED = 0
 loc: o/$(MODE)/tool/build/summy
 	find -name \*.h -or -name \*.hpp -or -name \*.c -or -name \*.cc -or -name \*.cpp -or -name \*.S -or -name \*.mk | \
 	$(XARGS) wc -l | grep total | awk '{print $$1}' | $<
 
-# PLEASE: MAINTAIN TOPOLOGICAL ORDER
-# FROM HIGHEST LEVEL TO LOWEST LEVEL
-COSMOPOLITAN_OBJECTS =			\
+COSMOPOLITAN =				\
 	CTL				\
-	THIRD_PARTY_DOUBLECONVERSION	\
-	THIRD_PARTY_OPENMP		\
-	TOOL_ARGS			\
-	NET_HTTP			\
 	DSP_AUDIO			\
-	LIBC_SOCK			\
-	LIBC_NT_WS2_32			\
-	LIBC_NT_IPHLPAPI		\
-	LIBC_X				\
-	THIRD_PARTY_GETOPT		\
+	LIBC_CALLS			\
+	LIBC_DLOPEN			\
+	LIBC_ELF			\
+	LIBC_FMT			\
+	LIBC_INTRIN			\
+	LIBC_IRQ			\
 	LIBC_LOG			\
-	THIRD_PARTY_TZ			\
-	THIRD_PARTY_MUSL		\
-	THIRD_PARTY_ZLIB_GZ		\
+	LIBC_MEM			\
+	LIBC_NEXGEN32E			\
+	LIBC_NT_ADVAPI32		\
+	LIBC_NT_BCRYPTPRIMITIVES	\
+	LIBC_NT_COMDLG32		\
+	LIBC_NT_GDI32			\
+	LIBC_NT_IPHLPAPI		\
+	LIBC_NT_KERNEL32		\
+	LIBC_NT_NTDLL			\
+	LIBC_NT_PDH			\
+	LIBC_NT_POWRPROF		\
+	LIBC_NT_PSAPI			\
+	LIBC_NT_REALTIME		\
+	LIBC_NT_SHELL32			\
+	LIBC_NT_SYNCHRONIZATION		\
+	LIBC_NT_USER32			\
+	LIBC_NT_WINMM			\
+	LIBC_NT_WS2_32			\
+	LIBC_PROC			\
+	LIBC_RUNTIME			\
+	LIBC_SOCK			\
+	LIBC_STDIO			\
+	LIBC_STR			\
+	LIBC_SYSTEM			\
+	LIBC_SYSV			\
+	LIBC_SYSV_CALLS			\
+	LIBC_THREAD			\
+	LIBC_TINYMATH			\
+	LIBC_VGA			\
+	LIBC_X				\
+	NET_HTTP			\
+	THIRD_PARTY_COMPILER_RT		\
+	THIRD_PARTY_DLMALLOC		\
+	THIRD_PARTY_DOUBLECONVERSION	\
+	THIRD_PARTY_GDTOA		\
+	THIRD_PARTY_GETOPT		\
 	THIRD_PARTY_LIBCXXABI		\
 	THIRD_PARTY_LIBUNWIND		\
-	LIBC_STDIO			\
-	THIRD_PARTY_GDTOA		\
-	THIRD_PARTY_REGEX		\
-	LIBC_THREAD			\
-	LIBC_PROC			\
-	THIRD_PARTY_NSYNC_MEM		\
-	LIBC_MEM			\
-	THIRD_PARTY_DLMALLOC		\
-	LIBC_DLOPEN			\
-	LIBC_RUNTIME			\
+	THIRD_PARTY_MUSL		\
 	THIRD_PARTY_NSYNC		\
-	LIBC_ELF			\
-	LIBC_IRQ			\
-	LIBC_CALLS			\
-	LIBC_SYSV_CALLS			\
-	LIBC_VGA			\
-	LIBC_NT_REALTIME		\
-	LIBC_NT_PSAPI			\
-	LIBC_NT_POWRPROF		\
-	LIBC_NT_PDH			\
-	LIBC_NT_GDI32			\
-	LIBC_NT_COMDLG32		\
-	LIBC_NT_USER32			\
-	LIBC_NT_NTDLL			\
-	LIBC_NT_ADVAPI32		\
-	LIBC_NT_SYNCHRONIZATION		\
-	LIBC_FMT			\
-	THIRD_PARTY_ZLIB		\
+	THIRD_PARTY_NSYNC_MEM		\
+	THIRD_PARTY_OPENMP		\
 	THIRD_PARTY_PUFF		\
-	THIRD_PARTY_COMPILER_RT		\
-	LIBC_TINYMATH			\
+	THIRD_PARTY_REGEX		\
+	THIRD_PARTY_TZ			\
 	THIRD_PARTY_XED			\
-	LIBC_STR			\
-	LIBC_SYSV			\
-	LIBC_INTRIN			\
-	LIBC_NT_BCRYPTPRIMITIVES	\
-	LIBC_NT_KERNEL32		\
-	LIBC_NEXGEN32E
+	THIRD_PARTY_ZLIB		\
+	THIRD_PARTY_ZLIB_GZ		\
+	TOOL_ARGS			\
 
 COSMOPOLITAN_H_PKGS =			\
 	APE				\
@@ -537,7 +555,7 @@ COSMOCC_PKGS =				\
 	THIRD_PARTY_INTEL
 
 o/$(MODE)/cosmopolitan.a:		\
-		$(foreach x,$(COSMOPOLITAN_OBJECTS),$($(x)_A_OBJS))
+		$(call reverse,$(call uniq,$(foreach x,$(COSMOPOLITAN),$($(x)))))
 
 COSMOCC_HDRS =								\
 	$(wildcard libc/integral/*)					\
@@ -551,7 +569,7 @@ COSMOPOLITAN_H_ROOT_HDRS =						\
 	libc/integral/normalize.inc					\
 	$(foreach x,$(COSMOPOLITAN_H_PKGS),$($(x)_HDRS))
 
-o/cosmopolitan.html: private .UNSANDBOXED = 1
+o/cosmopolitan.html: private .SANDBOXED = 0
 o/cosmopolitan.html:							\
 		o/$(MODE)/third_party/chibicc/chibicc.dbg		\
 		$(filter-out %.s,$(foreach x,$(COSMOPOLITAN_OBJECTS),$($(x)_SRCS)))	\
@@ -574,6 +592,7 @@ ifeq ($(ARCH), x86_64)
 TOOLCHAIN_ARTIFACTS =				\
 	o/$(MODE)/ape/ape.lds			\
 	o/$(MODE)/libc/crt/crt.o		\
+	o/$(MODE)/libc/crt/crtfastmath.o	\
 	o/$(MODE)/ape/ape.elf			\
 	o/$(MODE)/ape/ape.o			\
 	o/$(MODE)/ape/ape-copy-self.o		\
@@ -592,6 +611,7 @@ TOOLCHAIN_ARTIFACTS =				\
 	o/$(MODE)/ape/ape.elf			\
 	o/$(MODE)/ape/aarch64.lds		\
 	o/$(MODE)/libc/crt/crt.o		\
+	o/$(MODE)/libc/crt/crtfastmath.o	\
 	o/$(MODE)/cosmopolitan.a		\
 	o/$(MODE)/third_party/libcxx/libcxx.a	\
 	o/$(MODE)/tool/build/march-native	\
@@ -607,7 +627,7 @@ clean_toolchain:
 	$(RM) $(TOOLCHAIN_ARTIFACTS)
 
 aarch64: private .INTERNET = true
-aarch64: private .UNSANDBOXED = true
+aarch64: private .SANDBOXED = 0
 aarch64:
 	$(MAKE) m=aarch64
 

@@ -18,68 +18,51 @@
 ╚─────────────────────────────────────────────────────────────────────────────*/
 #include "libc/calls/syscall_support-nt.internal.h"
 #include "libc/errno.h"
-#include "libc/macros.h"
+#include "libc/limits.h"
 #include "libc/nt/errors.h"
 #include "libc/nt/files.h"
-#include "libc/nt/process.h"
 #include "libc/nt/runtime.h"
-#include "libc/nt/synchronization.h"
 #include "libc/sysv/errfuns.h"
+#include "libc/sysv/errno.h"
 
-textwindows int sys_chdir_nt_impl(char16_t path[hasatleast PATH_MAX],
-                                  uint32_t len) {
-  uint32_t n;
-  int e, ms, err;
-  char16_t var[4];
+textwindows int sys_chdir_nt16(char16_t path[hasatleast PATH_MAX],
+                               uint32_t len) {
 
-  if (len && path[len - 1] != u'\\') {
-    if (len + 2 > PATH_MAX)
-      return enametoolong();
-    path[len + 0] = u'\\';
-    path[len + 1] = u'\0';
-  }
+  // the win32 SetCurrentDirectory() API wants us to put back a trailing
+  // slash that was removed earlier, when __mkntpath() normalized things
+  if (len + 2 > PATH_MAX)
+    return enametoolong();
+  if (SetCurrentDirectory(path))
+    return 0;
 
-  /*
-   * chdir() seems flaky on windows 7
-   * in a similar way to rmdir() sigh
-   */
-  for (err = errno, ms = 1;; ms *= 2) {
-    if (SetCurrentDirectory(path)) {
-      /*
-       * Now we need to set a magic environment variable.
-       */
-      if ((n = GetCurrentDirectory(PATH_MAX, path))) {
-        if (n < PATH_MAX) {
-          if (!((path[0] == '/' && path[1] == '/') ||
-                (path[0] == '\\' && path[1] == '\\'))) {
-            var[0] = '=';
-            var[1] = path[0];
-            var[2] = ':';
-            var[3] = 0;
-            if (!SetEnvironmentVariable(var, path)) {
-              return __winerr();
-            }
-          }
-          return 0;
-        } else {
-          return enametoolong();
-        }
+  // remap win32 error codes to unix
+  uint32_t dwErrorCode;
+  switch ((dwErrorCode = GetLastError())) {
+    case kNtErrorFileNotFound:  // 2 a.k.a. ENOENT
+      // it does this when the parent components exist but file didn't
+      errno = ENOENT;
+      break;
+    case kNtErrorPathNotFound:  // 3 a.k.a. ENOTDIR
+      // with Windows, this means that the file doesn't exist, because
+      // a parent component didn't exist. however unix still considers
+      // that to be an ENOENT error. on UNIX this only becomes ENOTDIR
+      // if a parent component DID exist, but was not a real directory
+      if (__hasregularparent(path)) {
+        errno = ENOTDIR;
       } else {
-        return __winerr();
+        errno = ENOENT;
       }
-    } else {
-      e = GetLastError();
-      if (ms <= 512 &&
-          (e == kNtErrorFileNotFound || e == kNtErrorAccessDenied)) {
-        Sleep(ms);
-        errno = err;
-        continue;
-      } else {
-        break;
-      }
-    }
+      break;
+    case kNtErrorDirectory:  // 267 a.k.a. EISDIR
+      // it'll do this when try to chdir to a regular file that exists
+      // it could also be an ELOOP error although not worth supporting
+      errno = ENOTDIR;
+      break;
+    default:
+      errno = __errno_windows2linux(dwErrorCode);
+      break;
   }
-  return __fix_enotdir(-1, path);
+  return -1;
 }
 
 textwindows int sys_chdir_nt(const char *path) {
@@ -87,7 +70,5 @@ textwindows int sys_chdir_nt(const char *path) {
   char16_t path16[PATH_MAX];
   if ((len = __mkntpath(path, path16)) == -1)
     return -1;
-  if (!len)
-    return enoent();
-  return sys_chdir_nt_impl(path16, len);
+  return sys_chdir_nt16(path16, len);
 }

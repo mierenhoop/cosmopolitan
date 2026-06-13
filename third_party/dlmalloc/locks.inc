@@ -33,12 +33,21 @@
 
 #define MLOCK_T atomic_uint
 
-static int malloc_wipe(MLOCK_T *lk) {
+static inline int malloc_inlk(MLOCK_T *lk) {
   atomic_store_explicit(lk, 0, memory_order_relaxed);
   return 0;
 }
 
-static int malloc_lock(MLOCK_T *lk) {
+static inline int malloc_wipe(MLOCK_T *lk) {
+  atomic_store_explicit(lk, 0, memory_order_relaxed);
+  return 0;
+}
+
+static inline int malloc_kilk(MLOCK_T *lk) {
+  return 0;
+}
+
+static inline int malloc_lock(MLOCK_T *lk) {
   for (;;) {
     if (!atomic_exchange_explicit(lk, 1, memory_order_acquire))
       break;
@@ -49,7 +58,7 @@ static int malloc_lock(MLOCK_T *lk) {
   return 0;
 }
 
-static int malloc_unlock(MLOCK_T *lk) {
+static inline int malloc_unlk(MLOCK_T *lk) {
   atomic_store_explicit(lk, 0, memory_order_release);
   return 0;
 }
@@ -58,31 +67,40 @@ static int malloc_unlock(MLOCK_T *lk) {
 
 #define MLOCK_T nsync_mu
 
-static int malloc_wipe(MLOCK_T *lk) {
-  bzero(lk, sizeof(*lk));
+static inline int malloc_inlk(MLOCK_T *lk) {
+  atomic_store_explicit(&lk->word, 0, memory_order_relaxed);
+  lk->waiters = 0;
   return 0;
 }
 
-static int malloc_lock(MLOCK_T *lk) {
-  nsync_mu_lock(lk);
+static inline int malloc_wipe(MLOCK_T *lk) {
+  return malloc_inlk(lk);
+}
+
+static inline int malloc_kilk(MLOCK_T *lk) {
   return 0;
 }
 
-static int malloc_unlock(MLOCK_T *lk) {
-  nsync_mu_unlock(lk);
+static inline int malloc_lock(MLOCK_T *lk) {
+  if (__isthreaded >= 2)
+    nsync_mu_lock(lk);
+  return 0;
+}
+
+static inline int malloc_unlk(MLOCK_T *lk) {
+  if (__isthreaded >= 2)
+    nsync_mu_unlock(lk);
   return 0;
 }
 
 #endif
 
+#pragma GCC diagnostic ignored "-Wunused-value"
 #define ACQUIRE_LOCK(lk) malloc_lock(lk)
-#define RELEASE_LOCK(lk) malloc_unlock(lk)
-#define INITIAL_LOCK(lk) malloc_wipe(lk)
-#define DESTROY_LOCK(lk) malloc_wipe(lk)
-#define ACQUIRE_MALLOC_GLOBAL_LOCK() ACQUIRE_LOCK(&malloc_global_mutex);
-#define RELEASE_MALLOC_GLOBAL_LOCK() RELEASE_LOCK(&malloc_global_mutex);
-
-static MLOCK_T malloc_global_mutex;
+#define RELEASE_LOCK(lk) malloc_unlk(lk)
+#define INITIAL_LOCK(lk) malloc_inlk(lk)
+#define REFRESH_LOCK(lk) malloc_wipe(lk)
+#define DESTROY_LOCK(lk) malloc_kilk(lk)
 
 #define USE_LOCK_BIT               (2U)
 
