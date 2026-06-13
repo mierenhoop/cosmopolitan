@@ -97,17 +97,20 @@ bool32 TrackPopupMenu(int64_t hMenu, uint32_t uFlags, int32_t x, int32_t y,
                       const struct NtRect *prcRect);
 
 int WideCharToMultiByte(unsigned int CodePage, uint32_t dwFlags,
-                        uint16_t *lpWideCharStr, int cchWideChar,
+                        const uint16_t *lpWideCharStr, int cchWideChar,
                         char *lpMultiByteStr, int cbMultiByte,
                         uint16_t *lpDefaultChar, int *lpUsedDefaultChar);
 
-int MultiByteToWideChar(unsigned int CodePage, uint32_t dwFlags, char *lpMultiByteStr, int cbMultiByte, uint16_t *lpWideCharStr, int cchWideChar);
+int MultiByteToWideChar(unsigned int CodePage, uint32_t dwFlags,
+                        const char *lpMultiByteStr, int cbMultiByte,
+                        uint16_t *lpWideCharStr, int cchWideChar);
 
 
-bool32 ScreenToClient(int64_t hWnd, struct NtPoint *lpPoint):
+bool32 ScreenToClient(int64_t hWnd, struct NtPoint *lpPoint);
 bool32 AdjustWindowRectEx(struct NtRect *lpRect, uint32_t dwStyle, bool32 bMenu, uint32_t swExStyle);
 
 bool32 OpenClipboard(int64_t hWndNewOwner);
+int64_t GetClipboardData(uint32_t uFormat);
 int64_t SetClipboardData(uint32_t uFormat, void *hMem);
 bool32 EmptyClipboard(void);
 bool32 CloseClipboard(void);
