@@ -92,6 +92,8 @@ void *HeapReAlloc(int64_t hHeap, uint32_t dwFlags, void *lpMem,
 
 void *GlobalAlloc(uint32_t uFlags, uint64_t dwBytes) __wur;
 void *GlobalFree(void *hMem);
+void *GlobalLock(void *hMem);
+bool32 GlobalUnlock(void *hMem);
 
 /**
  * @param AllocationType

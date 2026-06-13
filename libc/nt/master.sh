@@ -466,6 +466,7 @@ imp	'MessageBoxEx'						MessageBoxExW						user32		5
 imp	'MoveWindow'						MoveWindow						user32		6
 imp	'MonitorFromPoint'					MonitorFromPoint					user32		2
 imp	'MonitorFromWindow'					MonitorFromWindow					user32		2
+imp	'MsgWaitForMultipleObjects'				MsgWaitForMultipleObjects				user32		5
 imp	'OpenClipboard'						OpenClipboard						user32		1
 imp	'PeekMessage'						PeekMessageW						user32		5
 imp	'PostMessage'						PostMessageW						user32		4

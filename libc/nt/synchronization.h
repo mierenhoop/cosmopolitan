@@ -74,6 +74,10 @@ bool32 RegisterWaitForSingleObject(int64_t *phNewWaitObject, int64_t hObject,
                                    void *Context, uint32_t dwMilliseconds,
                                    uint32_t dwFlags);
 
+uint32_t MsgWaitForMultipleObjects(uint32_t nCount, const int64_t *lpHandles,
+                                bool32 bWaitAll, uint32_t dwMilliseconds,
+                                uint32_t dwWakeMask);
+
 int64_t CreateWaitableTimer(
     const struct NtSecurityAttributes *lpTimerAttributes, bool32 bManualReset,
     const char16_t *lpTimerName);
